@@ -1,0 +1,25 @@
+schema_version = "1.0.0"
+
+id = "product_motion_studio"
+version = "0.3.0"
+name = "Product Motion Studio"
+tagline = "Product animation studio: camera, motion, lights, backdrop, look"
+maintainer = "Elia Venturi <elio4256@gmail.com>"
+type = "add-on"
+
+blender_version_min = "5.0.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+[permissions]
+files = "Read a backdrop image, save and share your own presets"
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "*.pyc",
+  "/tests/",
+  "/tools/",
+]
