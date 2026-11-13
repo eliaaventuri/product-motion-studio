@@ -56,7 +56,7 @@ Frames from the demo above, rendered in Cycles with six of the recipes on simple
 ## Installation
 
 **User**
-1. Download `product_motion_studio-0.3.0.zip` from the [Releases](https://github.com/elo-savage/product-motion-studio/releases) page — **do not unzip it**
+1. Download `product_motion_studio-0.3.0.zip` from the [Releases](https://github.com/eliaaventuri/product-motion-studio/releases) page — **do not unzip it**
 2. Blender → Edit → Preferences → Get Extensions → top-right menu → Install from Disk → select the zip
 3. Enable "Product Motion Studio"
 
@@ -146,7 +146,7 @@ GPL-3.0-or-later — free and open source.
 
 ## Author
 
-**Elia Venturi** — [github.com/elo-savage](https://github.com/elo-savage)
+**Elia Venturi** — [github.com/eliaaventuri](https://github.com/eliaaventuri)
 
 ---
 
