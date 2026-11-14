@@ -116,7 +116,7 @@ The API is designed for **Claude + Blender MCP** — give the agent a brief and 
 
 **Product Animation Director for Blender** (paid, on Agensi) — an art-director skill that produces a brief & shot list, prepares CAD models, assigns materials, designs lighting & camera, animates with overshoot/settle/weight, grades the look, renders, runs measurable checks, and drives PMS through its API across 12 workflows (brief → prepare → materials → lights → camera → animate → preview → check → critique → variants → render → full spot).
 
-👉 **[Get the skill on Agensi](AGENSI_LINK_ANIMAZIONE)** · the add-on itself stays free and open source.
+👉 **[Get the skill on Agensi](https://agensi.io/skills/product-animation-director-blender-spots-brief-to-render)** · the add-on itself stays free and open source.
 
 ## Measured quality
 
