@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "product_motion_studio"
-version = "0.3.0"
+version = "0.4.0"
 name = "Product Motion Studio"
 tagline = "Product animation studio: camera, motion, lights, backdrop, look"
 maintainer = "Elia Venturi <elio4256@gmail.com>"

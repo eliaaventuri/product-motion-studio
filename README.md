@@ -4,7 +4,7 @@
 
 ![Blender](https://img.shields.io/badge/Blender-5.0%2B-orange.svg)
 ![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)
-![Version](https://img.shields.io/badge/Version-0.3.0-green.svg)
+![Version](https://img.shields.io/badge/Version-0.4.0-green.svg)
 
 [![Juicy Salif film made with Product Motion Studio](docs/media/demo.gif)](docs/media/juicy_salif_film_16x9.mp4)
 
@@ -103,7 +103,7 @@ One frame from each of the six shots of the film above, rendered in Cycles.
 ## Installation
 
 **User**
-1. Download `product_motion_studio-0.3.0.zip` from the [Releases](https://github.com/eliaaventuri/product-motion-studio/releases) page — **do not unzip it**
+1. Download `product_motion_studio-0.4.0.zip` from the [Releases](https://github.com/eliaaventuri/product-motion-studio/releases) page — **do not unzip it**
 2. Blender → Edit → Preferences → Get Extensions → top-right menu → Install from Disk → select the zip
 3. Enable "Product Motion Studio"
 
