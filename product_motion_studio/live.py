@@ -11,18 +11,18 @@ sections they set, so choosing a preset explicitly always starts from its defaul
 
 import json
 import traceback
-from math import radians
+from math import log, radians
 
 import bpy
 
-from . import core
+from . import core, motion
 
 # section -> (signature step, live props)
 GROUPS = {
-    'camera_shot': ('camera', ('cam_lens', 'cam_padding', 'cam_dof', 'cam_fstop', 'cam_focus')),
-    'lighting': ('lighting', ('light_power', 'light_tint', 'light_rot')),
+    'camera_shot': ('camera', ('cam_lens', 'cam_padding', 'cam_dof', 'cam_fstop', 'cam_focus', 'cam_autofocus')),
+    'lighting': ('lighting', ('light_power', 'light_tint', 'light_rot', 'light_fill', 'light_rim', 'light_temp')),
     'background': ('background', ('bg_color_a', 'bg_color_mid', 'bg_color_b', 'bg_type', 'bg_rotation', 'bg_roughness',
-                                  'bg_selflight')),
+                                  'bg_selflight', 'bg_distance', 'bg_cove')),
     'background_light': ('bglight', ('bgl_color', 'bgl_power')),
     'floor': ('floor', ('floor_color', 'floor_roughness')),
     'look': ('compositing', ('look_intensity', 'look_exposure')),
@@ -50,9 +50,11 @@ def defaults(scene, section, data):
     if section == 'camera_shot':
         f = float(data.get('dof', 0) or 0)
         return dict(cam_lens=float(data['lens']), cam_padding=float(data['padding']), cam_dof=f > 0,
-                    cam_fstop=f if f > 0 else FSTOP, cam_focus=float(data.get('focus_offset', 0.0)))
+                    cam_fstop=f if f > 0 else FSTOP, cam_focus=float(data.get('focus_offset', 0.0)),
+                    cam_autofocus=bool(data.get('autofocus', False)))
     if section == 'lighting':
-        return dict(light_power=1.0, light_tint=(1.0, 1.0, 1.0), light_rot=0.0)
+        return dict(light_power=1.0, light_tint=(1.0, 1.0, 1.0), light_rot=0.0,
+                    light_fill=1.0, light_rim=1.0, light_temp=0.0)
     if section == 'background_light':
         return dict(bgl_power=1.0, bgl_color=(1.0, 1.0, 1.0))
     if section == 'background':
@@ -61,7 +63,8 @@ def defaults(scene, section, data):
         a, b = stops[0][1], stops[-1][1]
         return dict(bg_color_a=a, bg_color_b=b, bg_color_mid=stops[m][1] if m else tuple((x + y) / 2 for x, y in zip(a, b)),
                     bg_type='RADIAL' if g.get('type') == 'radial' else 'LINEAR', bg_rotation=float(g.get('rotation', 0)),
-                    bg_roughness=float(data.get('roughness', 0.9)), bg_selflight=float(data.get('self_light', 0.0)))
+                    bg_roughness=float(data.get('roughness', 0.9)), bg_selflight=float(data.get('self_light', 0.0)),
+                    bg_distance=float(data.get('distance', 1.0)), bg_cove=float(data.get('cove', 1.0)))
     if section == 'floor':
         return dict(floor_color=tuple(data.get('color') or pms.bg_color_a),
                     floor_roughness=float(data.get('roughness', 0.85)))
@@ -76,7 +79,7 @@ def merge(scene, section, data):
     d = dict(data)
     if section == 'camera_shot':
         d.update(lens=pms.cam_lens, padding=pms.cam_padding, dof=pms.cam_fstop if pms.cam_dof else 0.0,
-                 fstop=pms.cam_fstop, focus_offset=pms.cam_focus)
+                 fstop=pms.cam_fstop, focus_offset=pms.cam_focus, autofocus=pms.cam_autofocus)
     elif section == 'background':
         stops = _stops(data)
         m = _mid_index(stops)
@@ -86,7 +89,8 @@ def merge(scene, section, data):
             stops[m] = (stops[m][0], tuple(pms.bg_color_mid))
         g = dict(data.get('gradient', {}))
         g['type'], g['rotation'] = pms.bg_type.lower(), pms.bg_rotation
-        d.update(stops=stops, gradient=g, roughness=pms.bg_roughness, self_light=pms.bg_selflight)
+        d.update(stops=stops, gradient=g, roughness=pms.bg_roughness, self_light=pms.bg_selflight,
+                 distance=pms.bg_distance, cove=pms.bg_cove)
     elif section == 'floor':
         d.update(color=tuple(pms.floor_color), roughness=pms.floor_roughness)
     elif section == 'look':
@@ -157,27 +161,62 @@ def values(scene):
 
 # === applying values to the objects ============================================
 
-def scale_lights(scene, key, power, tint):
-    """energy = base * power, colour = base * tint, for every light of a section (the bases are stored by the builders)."""
+ROLE_PROPS = {'fill': 'light_fill', 'rim': 'light_rim', 'back': 'light_rim'}   # light role -> its live power factor
+
+
+def kelvin_rgb(k):
+    """Tanner Helland blackbody approximation (k clamped 1000..40000, t = k/100). Returns tuple of 3 floats (linear 0..1)."""
+    k = max(1000, min(40000, k))
+    t = k / 100.0
+    if t <= 66:
+        r = 255
+        g = 99.4708025861 * log(t) - 161.1195681661
+        b = 138.5177312231 * log(t - 10) - 305.0447927307 if t > 10 else 0
+    else:
+        r = 329.698727446 * (t - 60) ** -0.1332047592
+        g = 288.1221695283 * (t - 60) ** -0.0755148492
+        b = 255
+    r, g, b = max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b))
+    return ((r / 255.0) ** 2.2, (g / 255.0) ** 2.2, (b / 255.0) ** 2.2)
+
+
+def temp_factor(shift):
+    """Factor to multiply colour by for a temperature shift in kelvin (shift 0 -> (1,1,1), luminance preserved)."""
+    a = kelvin_rgb(6500 + shift)
+    b = kelvin_rgb(6500)
+    f = [x / y if y > 0 else 1.0 for x, y in zip(a, b)]
+    # normalize to keep luminance (ITU-R BT.709 weights)
+    lum = 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2]
+    if lum > 0:
+        f = [x / lum for x in f]
+    return tuple(f)
+
+
+def scale_lights(scene, key, power, tint, roles=None, warm=(1.0, 1.0, 1.0)):
+    """energy = base * power * role_factor, colour = base * tint * warm, for every light of a section."""
+    pms = core.settings(scene)
     col = bpy.data.collections.get(core.SUB[key])
     for ob in (col.all_objects if col else ()):
         base = ob.data.get('pms_base') if ob.type == 'LIGHT' else None
         if base:
-            ob.data.energy = base[0] * power
-            ob.data.color = [base[1 + i] * tint[i] for i in range(3)]
+            role = ob.data.get('pms_role', 'light')
+            role_factor = getattr(pms, roles[role]) if roles and role in roles else 1.0
+            ob.data.energy = base[0] * power * role_factor
+            ob.data.color = [base[1 + i] * tint[i] * warm[i] for i in range(3)]
 
 
 def apply_lights(scene):
-    """Lighting live values: power and tint on the lights and on the world, rig rotation."""
+    """Lighting live values: power and tint on the lights and on the world, rig rotation, temperature shift."""
     pms = core.settings(scene)
-    scale_lights(scene, 'lights', pms.light_power, pms.light_tint)
+    warm = temp_factor(pms.light_temp)
+    scale_lights(scene, 'lights', pms.light_power, pms.light_tint, ROLE_PROPS, warm)
     w = scene.world
     if w is not None and w.name == 'PMS_World' and w.get('pms_base'):
         bg = next((n for n in w.node_tree.nodes if n.type == 'BACKGROUND'), None)
         if bg is not None:
             b = w['pms_base']
             bg.inputs['Strength'].default_value = b[0] * pms.light_power
-            bg.inputs['Color'].default_value = (*(b[1 + i] * pms.light_tint[i] for i in range(3)), 1.0)
+            bg.inputs['Color'].default_value = (*(b[1 + i] * pms.light_tint[i] * warm[i] for i in range(3)), 1.0)
     rig = bpy.data.objects.get('PMS_Light_Rig')
     if rig is not None:
         rig.delta_rotation_euler[2] = radians(pms.light_rot)
@@ -188,9 +227,10 @@ def apply_bg_lights(scene):
     scale_lights(scene, 'bg_lights', pms.bgl_power, pms.bgl_color)
 
 
-def apply_focus(scene, cam_data=None):
+def apply_focus(scene, cam_data=None, auto=True):
     """DOF on/off, f-stop and the focus point (the DOF empty, moved along the base view direction by delta_location so
-    that the focus pull of a camera motion keeps working)."""
+    that the focus pull of a camera motion keeps working), then Auto Focus (auto=False: the camera build bakes it after
+    the camera motion, so that the focus follows the moving camera)."""
     pms = core.settings(scene)
     cam = bpy.data.objects.get('PMS_Camera')
     cd = cam_data or (cam.data if cam else None)
@@ -205,6 +245,81 @@ def apply_focus(scene, cam_data=None):
         if back is not None:
             size = float(core.info(scene).size)
             focus.delta_location = [b * pms.cam_focus * size for b in back]
+    if auto:
+        autofocus(scene, cam)
+
+
+def autofocus(scene, cam):
+    """Auto Focus on (with DOF): bake the focus on the product surface; off: put the DOF empty back in charge."""
+    pms = core.settings(scene)
+    if cam is not None and pms.cam_autofocus and pms.cam_dof:
+        bake_autofocus(scene, cam)
+    else:
+        clear_autofocus(cam)
+
+
+def _surface(scene, dg, origin, target, prods, size):
+    """Distance from origin to the first product surface on the way to target (scene objects in front are skipped);
+    the distance to target when nothing of the product is hit."""
+    d = target - origin
+    far = d.length
+    if far < 1e-9:
+        return far
+    ray = d / far
+    start = origin
+    for _ in range(8):                                   # at most 8 non-product hits (floor, backdrop, props)
+        hit, loc, _n, _i, ob, _m = scene.ray_cast(dg, start, ray, distance=2 * far)
+        if not hit:
+            break
+        if ob.original in prods:
+            return (loc - origin).length
+        start = loc + ray * 1e-4 * size
+    return far
+
+
+def bake_autofocus(scene, cam):
+    """Key dof.focus_distance on every frame at the product surface seen from the camera towards the DOF empty
+    (+ Focus Offset), linear keys; the camera then focuses by distance (no focus object)."""
+    pms = core.settings(scene)
+    root = bpy.data.objects.get(core.ROOT_NAME)
+    if root is None:
+        return
+    prods = set(root.children_recursive)
+    size = float(core.info(scene).size)
+    focus = bpy.data.objects.get('PMS_DOF_Empty')
+    saved = scene.frame_current
+    keys = []
+    for f in range(scene.frame_start, scene.frame_end + 1):
+        scene.frame_set(f)
+        dg = bpy.context.evaluated_depsgraph_get()
+        target = (focus or root).matrix_world.translation
+        dist = _surface(scene, dg, cam.matrix_world.translation.copy(), target, prods, size)
+        keys.append((f, max(1e-3, dist + pms.cam_focus * size)))
+    scene.frame_set(saved)
+    cd = cam.data
+    cd.dof.focus_object = None
+    motion.remove_fcurves(cd, 'dof.focus_distance')
+    for f, dist in keys:
+        cd.dof.focus_distance = dist
+        cd.keyframe_insert('dof.focus_distance', frame=f)
+    fc = motion._fcurve(cd, 'dof.focus_distance')
+    for kp in fc.keyframe_points:
+        kp.interpolation = 'LINEAR'
+    cd['pms_autofocus'] = True
+
+
+def clear_autofocus(cam):
+    """Remove the Auto Focus keys and give the focus back to the DOF empty."""
+    if cam is None or not cam.data.get('pms_autofocus'):
+        return
+    cd = cam.data
+    motion.remove_fcurves(cd, 'dof.focus_distance')
+    if not any(True for _ in motion.iter_fcurves(cd)):
+        cd.animation_data_clear()
+    del cd['pms_autofocus']
+    focus = bpy.data.objects.get('PMS_DOF_Empty')
+    if focus:
+        cd.dof.focus_object = focus
 
 
 # === update callbacks =============================================================
@@ -259,6 +374,14 @@ def apply_background(scene, pms):
             build_background.set_self_light(floor, data.get('self_light', 0.0))
 
 
+def refit_backdrop(scene, pms):
+    """Rebuild the backdrop if it was not edited by hand; otherwise keep the hand edit."""
+    if core.modified(scene, 'background'):
+        return
+    from . import api
+    api.run(api.steps_for('background', scene), None, scene)
+
+
 def apply_floor(scene, pms):
     mat = _material('PMS_Floor')
     if mat is None:
@@ -283,11 +406,17 @@ CALLBACKS = {
     'cam_lens': updater('camera', refit), 'cam_padding': updater('camera', refit),
     'cam_dof': updater('camera', lambda s, p: apply_focus(s)), 'cam_fstop': updater('camera', lambda s, p: apply_focus(s)),
     'cam_focus': updater('camera', lambda s, p: apply_focus(s)),
-    'light_power': updater('lighting', lambda s, p: apply_lights(s)), 'light_tint': updater('lighting', lambda s, p: apply_lights(s)),
+    'cam_autofocus': updater('camera', lambda s, p: apply_focus(s)),
+    'light_power': updater('lighting', lambda s, p: apply_lights(s)),
+    'light_tint': updater('lighting', lambda s, p: apply_lights(s)),
     'light_rot': updater('lighting', lambda s, p: apply_lights(s)),
+    'light_fill': updater('lighting', lambda s, p: apply_lights(s)),
+    'light_rim': updater('lighting', lambda s, p: apply_lights(s)),
+    'light_temp': updater('lighting', lambda s, p: apply_lights(s)),
     'bgl_power': updater('bglight', lambda s, p: apply_bg_lights(s)), 'bgl_color': updater('bglight', lambda s, p: apply_bg_lights(s)),
     'floor_color': updater('floor', apply_floor), 'floor_roughness': updater('floor', apply_floor),
     'look_intensity': updater('compositing', apply_look), 'look_exposure': updater('compositing', apply_look),
 }
 for _k in GROUPS['background'][1]:
     CALLBACKS[_k] = updater('background', apply_background)
+CALLBACKS['bg_distance'] = CALLBACKS['bg_cove'] = updater('background', refit_backdrop)

@@ -77,17 +77,24 @@ def build(scene):
     lens, pad = float(shot['lens']), float(shot['padding'])
     az, el = radians(shot['az']), radians(shot['el'])
     tz = shot.get('target_z', 0.5)
+    roll = radians(shot.get('roll', 0.0))
+    ortho = bool(shot.get('ortho', False))
+    shift = shot.get('shift', (0.0, 0.0))
     target_pos = Vector((inf.center.x, inf.center.y, inf.base_z + tz * inf.dims.z))
     target_pos += Vector(track.hero_center()) - inf.center    # looks at the hero pose (a drift that ends off-centre stays centred)
     tans = core.frame_tans(scene, lens)
+    track.roll = roll
     if meta.get('offscreen'):
         track.mark_offscreen(target_pos, az, el, tans, pad)
-    dist = track.fit(target_pos, [az], [el], tans, pad)
+    # Use strict fitting for exploded parts to ensure all frames (including action frames) fit within frame
+    strict = any(ch.get('pms_explode') for ch in inf.root.children)
+    dist = track.fit(target_pos, [az], [el], tans, pad, strict=strict)
     warnings = []
     min_z = inf.base_z + 0.02 * inf.size                    # camera never goes under the floor
     if target_pos.z + dist * sin(el) < min_z:
         el = asin(max(-1.0, min(1.0, (min_z - target_pos.z) / dist)))
-        dist = track.fit(target_pos, [az], [el], tans, pad)
+        strict = any(ch.get('pms_explode') for ch in inf.root.children)
+        dist = track.fit(target_pos, [az], [el], tans, pad, strict=strict)
         warnings.append("camera raised to stay above the floor")
     pms.base_az = shot['az']
 
@@ -97,13 +104,18 @@ def build(scene):
     cdata = bpy.data.cameras.new('PMS_Camera')
     cdata.lens, cdata.sensor_fit = lens, 'AUTO'
     cdata.clip_start, cdata.clip_end = inf.size * 0.01, inf.size * 300
+    cdata.shift_x, cdata.shift_y = float(shift[0]), float(shift[1])
+    if ortho:
+        cdata.type = 'ORTHO'
+        cdata.ortho_scale = track.ortho_scale(target_pos, az, el, tans, pad)
     cam = core.link(scene, 'camera', bpy.data.objects.new('PMS_Camera', cdata))
     cam.parent = pivot
     cam.location = (0, -dist, 0)
     cam.rotation_euler = (pi / 2, 0, 0)                      # looks along the pivot's +Y, at its origin
+    cam.delta_rotation_euler = (0.0, roll, 0.0)
     dof = core.new_empty(scene, 'camera', 'PMS_DOF_Empty', inf.center, 'SPHERE', inf.size * 0.02)
     dof['pms_back'] = tuple(core.cam_basis(az, el)[2])      # target -> camera: the live Focus Offset moves the empty along it
-    live.apply_focus(scene, cdata)
+    live.apply_focus(scene, cdata, auto=False)               # Auto Focus: baked after the motion, below
 
     ctx = core.CamCtx(scene, inf, core.overrides(scene, 'camera_motion'), az, el, dist, lens, pad,
                       track, target_pos)
@@ -113,6 +125,7 @@ def build(scene):
     _restore_views(views, cam)
     core.orient_rigs(scene)
     _readopt(scene, pms, pivot, kept)
+    live.autofocus(scene, cam)                               # the focus follows the moving camera
     bpy.context.view_layer.update()
     return {'camera': cam.name, 'shot': shot_p.id, 'camera_motion': mot_p.id, 'distance': dist,
             'lens': lens, 'opts_used': sorted(ctx.opt.used), 'warnings': warnings}

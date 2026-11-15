@@ -507,6 +507,55 @@ register('lighting', 'food_warm_side_deep', 'Food Warm Side Deep', 'food',
              _a('rim', 160, 40, 2.4, (0.6, 1.0), 35, 4200), _a('top', 0, 75, 2.0, (1.2, 1.2), 11, 5000, 'DISK')]))
 
 
+# --- specialised rigs --------------------------------------------------------------------------------------------
+
+register('lighting', 'textile_micro_rake', 'Textile Micro Rake', 'dramatic',
+         'Hard grazing key from the side, almost at floor level: stitching, leather grain and knit loops cast micro-shadows; a weaker rake '
+         'from the other side and a cool rim. Sneakers, knitwear, leather goods.',
+         product_types=['packaging', 'beauty'], style='hard',
+         data=dict(world_strength=0.0, lights=[
+             _a('key', -85, 6, 2.2, (0.2, 0.3), 20), _a('fill', 85, 15, 2.5, (1.0, 1.0), 5.88),
+             _a('rim', 160, 25, 2.4, (0.3, 1.4), 22.4, 6500)]))
+
+register('lighting', 'watch_dial_antiglare', 'Watch Dial Anti-Glare', 'jewellery',
+         'Big even panel from above-front so the sapphire crystal mirrors a flat soft surface (no hot spots), two tiny spots make the '
+         'metal indices sparkle, weak rim. Watches, gauges, glass-covered dials.',
+         product_types=['jewellery', 'metal', 'glass'], style='soft',
+         data=dict(world_strength=0.002, lights=[
+             _a('key', 0, 60, 2.5, (2.5, 2.5), 50.9), _s('spec', 40, 30, 2.4, 0.05, 18.5, 5600, 12, 0.2),
+             _s('spec', -40, 30, 2.4, 0.05, 18.5, 5600, 12, 0.2), _a('rim', 170, 20, 2.4, (0.3, 1.4), 13.9, 6500)]))
+
+register('lighting', 'self_lit_screen_balance', 'Self-Lit Screen Balance', 'tech',
+         'Low soft light from the sides only (nothing near the camera reflects in the glass): the lit screen keeps its contrast and colour. '
+         'Phones, smartwatches, laptops with the display on.',
+         product_types=['tech'], style='dark',
+         data=dict(world_strength=0.0, lights=[
+             _a('key', -70, 35, 2.4, (1.4, 1.2), 35.6, 6200), _a('fill', 70, 12, 3.0, (2.4, 1.8), 8.91),
+             _a('rim', 150, 15, 2.2, (0.25, 1.6), 29.7, 7500)]))
+
+register('lighting', 'overcast_north_window', 'Overcast North Window', 'highkey',
+         'One big cool window from the side, like north light on a grey day, and a white bounce card opposite: soft directional '
+         'modelling, no hard rim. Hand-made ceramics, Scandinavian design, matte surfaces.',
+         product_types=['food', 'cosmetics', 'packaging'], style='soft',
+         data=dict(world_strength=0.006, lights=[
+             _a('key', -75, 25, 2.5, (3.0, 3.5), 119, 7000), _a('fill', 95, 10, 2.5, (2.0, 2.0), 29.6, 6500),
+             _a('back', 180, 5, 2.8, (2.5, 1.5), 8.07)]))
+
+register('lighting', 'cyber_rgb_triad', 'Cyber RGB Triad', 'color',
+         'Three coloured strips around the product (cyan, magenta, violet) for strong colour separation, plus a weak neutral top key so '
+         'it is not a black silhouette. Gaming peripherals, hardware.',
+         product_types=['tech', 'metal', 'automotive'], style='dark',
+         data=dict(world_strength=0.0, lights=[
+             _a('rim', 120, 20, 2.2, (0.3, 1.6), 38.7, rgb=(0.0, 0.85, 1.0)), _a('back', -120, 20, 2.2, (0.3, 1.6), 38.7, rgb=(1.0, 0.0, 0.75)),
+             _a('top', 180, 45, 2.2, (0.3, 1.6), 38.7, rgb=(0.55, 0.1, 1.0)), _a('key', 0, 65, 2.5, (1.2, 1.2), 15.5)]))
+
+register('lighting', 'chiaroscuro_fresnel', 'Chiaroscuro Fresnel', 'dramatic',
+         'One tight theatrical spot with a hard edge and hard shadows, the rest falls into black; a whisper of rim. Dramatic product portraits.',
+         product_types=['beauty', 'glass', 'cosmetics', 'jewellery'], style='dark',
+         data=dict(world_strength=0.0, lights=[
+             _s('key', -45, 35, 2.4, 0.05, 52.7, 5600, 22, 0.08), _a('rim', 150, 10, 2.2, (0.2, 1.2), 13.2, 6500)]))
+
+
 # CYCLES COMPENSATION: Cycles has the studio's bounces and Eevee has not, so build_compositing.CYCLES_EV takes half a stop off every
 # Cycles render; these are the presets that need more or less than that (stops, + = brighter), measured with the test scene against
 # Eevee (STATO.md, "Cycles"). They add up with the ones of the other sections.  Re-measure after changing the lights.
@@ -537,6 +586,9 @@ CYCLES_EV = {
     'silhouette_bright_back': -0.25,
     'dispersion_crystal_points': -0.85,
     'dispersion_backlit_prism': -0.30,
+    'textile_micro_rake': -0.30,             # part II: measured with tools/calibrate.py against three_point_classic
+    'cyber_rgb_triad': -0.30,
+    'chiaroscuro_fresnel': +0.25,
 }
 for _id, _ev in CYCLES_EV.items():
     REGISTRY['lighting'][_id].data['cycles_ev'] = _ev

@@ -135,6 +135,8 @@ def build(scene):
         for key, name in (('threshold', 'Threshold'), ('strength', 'Strength'), ('size', 'Size')):
             if key in g:
                 n.inputs[name].default_value = g[key]
+        if 'tint' in g:                                     # coloured glow (halation): RGB, alpha 1
+            n.inputs['Tint'].default_value = (*g['tint'][:3], 1.0)
         link(img, n.inputs['Image'])
         img = n.outputs['Image']
     lens = data.get('lens')

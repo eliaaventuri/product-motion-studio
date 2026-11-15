@@ -87,7 +87,7 @@ def mat_diff(a, b, size):
     return d
 
 
-def containment(sc, cam, root, inf):
+def containment(sc, cam, root, inf, limit=0.2):
     """Worst (center outside, overflow fraction, corner behind camera) over frames sampled every 5."""
     worst = 0.0
     for f in range(sc.frame_start, sc.frame_end + 1, 5):
@@ -103,7 +103,7 @@ def containment(sc, cam, root, inf):
             lo, hi = min(getattr(p, axis) for p in pts), max(getattr(p, axis) for p in pts)
             over = (max(0, -lo) + max(0, hi - 1)) / max(hi - lo, 1e-9)
             worst = max(worst, over)
-            if over > 0.2:
+            if over > limit:
                 raise AssertionError(f"frame {f}: product leaves the frame by {over:.0%} on {axis}")
     return worst
 
@@ -218,15 +218,18 @@ def t4():
     return f"{len(notes)} motions"
 
 
+DELIBERATE_CROP = {'detail_corner_crop': 0.5}    # crops on purpose (tight + lens shift): the centre must stay in, the overflow may be larger
+
+
 @test(5, "product stays in frame: every shot, camera motion, loop and format (3 product shapes)")
 def t5():
     sc = scene()
     worst, n = 0.0, 0
 
-    def check():
+    def check(limit=0.2):
         nonlocal worst, n
         inf = core.info()
-        worst = max(worst, containment(sc, sc.camera, inf.root, inf))
+        worst = max(worst, containment(sc, sc.camera, inf.root, inf, limit))
         n += 1
 
     for shape in ('suzanne+cylinder', 'flat', 'tall'):
@@ -234,7 +237,7 @@ def t5():
         api.build(objects=prods, product_motion='static', camera_motion='static', shot='hero_34')
         for pid in presets.REGISTRY['camera_shot']:
             api.apply('camera_shot', pid)
-            check()
+            check(DELIBERATE_CROP.get(pid, 0.2))
         api.apply('camera_shot', 'hero_34')
         for pid in presets.REGISTRY['camera_motion']:
             api.apply('camera_motion', pid)
@@ -453,13 +456,13 @@ def t13():
     return f"{checked} (filter, preset) pairs checked in {len(props.FILTERED)} sections"
 
 
-@test(14, "extra: one thumbnail (128x128 jpg) per preset of the six sections, none left over, < 3 MB in all")
+@test(14, "extra: one thumbnail (128x128 jpg) per preset of every thumbnail section, none left over, < 3 MB in all")
 def t14():
     from product_motion_studio import previews
     total, n = 0, 0
     for section in previews.SECTIONS:
         folder = os.path.join(previews.DIR, section)
-        assert sorted(f[:-4] for f in os.listdir(folder)) == sorted(presets.REGISTRY[section]), f"{section}: thumbnails != presets"
+        assert sorted(os.listdir(folder)) == sorted(previews.filename(p) for p in presets.REGISTRY[section]), f"{section}: thumbnails != presets"
         for pid in presets.REGISTRY[section]:
             path = previews.path(section, pid)
             total += os.path.getsize(path)

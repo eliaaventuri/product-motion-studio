@@ -35,7 +35,8 @@ SCENE_SECTIONS = capture.SECTIONS                       # every section a scene 
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 ENGINES = ('CYCLES', 'BLENDER_EEVEE', 'BLENDER_WORKBENCH')
 SETTINGS = ('duration', 'fps', 'frame_start', 'engine', 'animate_lighting', 'isolate_lights', 'render_quality',
-            'render_motion_blur', 'render_format', 'bg_image', 'render_custom_engine', 'render_samples', 'render_percent')
+            'render_motion_blur', 'render_format', 'bg_image', 'render_custom_engine', 'render_samples', 'render_percent',
+            'render_passes', 'pack_kind', 'pack_mode', 'motion_loop', 'motion_intro_s')
 WARNINGS = []                                           # problems found while loading (corrupt file, missing base...)
 REV = [0]                                               # grows with every change of the lists: caches key on it
 _SCENES = {}                                            # scene id -> entry

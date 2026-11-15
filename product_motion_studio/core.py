@@ -428,8 +428,22 @@ def has_product():
     return bpy.data.objects.get(ROOT_NAME) is not None
 
 
+def clear_parts_motion(root):
+    """Remove explode animation from all direct children of root that have pms_explode."""
+    for ch in root.children:
+        if ch.get('pms_explode'):
+            action = ch.animation_data.action if ch.animation_data else None
+            ch.animation_data_clear()
+            if action and action.users == 0:
+                bpy.data.actions.remove(action)
+            ch.delta_location[2] = 0.0
+            if 'pms_explode' in ch:
+                del ch['pms_explode']
+
+
 def reset_root(root):
     """Remove all animation from the root and put it back on its rest pose."""
+    clear_parts_motion(root)
     root.animation_data_clear()
     restore_rest_values(root)
     purge_orphans()
@@ -446,6 +460,7 @@ def restore_rest_values(root):
 
 def unprepare(root):
     """Give every product object its original parent/parent-inverse; delete the root. Returns the products."""
+    clear_parts_motion(root)
     products = []
     for ob in list(root.children):
         orig = ob.get('pms_orig')
@@ -590,6 +605,7 @@ class Track:
         corners = np.array([tuple(c) for c in inf.corners]) * (vec('scale') * np.array(root.delta_scale))[:, None, :]
         self.pts = (vec('location') + vec('delta_location'))[:, None, :] + np.einsum('nij,nkj->nki', R, corners)
         self.size, self.loop, self.near = inf.size, loop, max(1, round(EXIT_S * fps))
+        self.roll = 0.0
         ctr = self.pts.mean(axis=1)
         if loop:
             self.hero = np.linalg.norm(ctr - ctr[0], axis=1) < HERO_TOL * self.size
@@ -600,6 +616,27 @@ class Track:
             self.H = self.pts[-1:]
         self.exempt, self.offscreen = np.zeros(n, bool), False
 
+        # Account for parts with pms_explode: they lift along Z, expand the camera bounds
+        if any(ch.get('pms_explode') for ch in inf.root.children):
+            extra = np.zeros(n)
+            for ch in inf.root.children:
+                if ch.get('pms_explode'):
+                    for fc in motion.iter_fcurves(ch):
+                        if fc.data_path == 'delta_location' and fc.array_index == 2:
+                            vals = np.array([fc.evaluate(f) for f in self.frames])
+                            extra = np.maximum(extra, np.maximum(vals, 0.0))
+            # Find the 4 highest corners (max local z in inf.corners)
+            corners_local = np.array([tuple(c) for c in inf.corners])
+            top_indices = np.argsort(corners_local[:, 2])[-4:]
+            self.pts[:, top_indices, 2] += extra[:, None]
+
+    def _roll(self, x, y):
+        """Rotate x, y by self.roll (radians). If roll is 0 returns (x, y) unchanged."""
+        if self.roll == 0.0:
+            return x, y
+        c, s = np.cos(self.roll), np.sin(self.roll)
+        return x * c - y * s, x * s + y * c
+
     def action(self):
         """Frames that only have to respect the action allowance."""
         return ~self.exempt & (~self.hero if self.loop else True)
@@ -608,12 +645,13 @@ class Track:
         """Centre of the product's box on its hero pose (the camera looks at it)."""
         return self.H.mean(axis=(0, 1)) if self.loop else self.pts[-1].mean(axis=0)
 
-    @staticmethod
-    def _coords(pts, target, az, el):
+    def _coords(self, pts, target, az, el):
         """Camera coordinates (x right, y up, t towards the camera) of pts (F, K, 3) for the camera angles az, el (radians,
-        arrays of C values): three arrays (C, F, K)."""
+        arrays of C values): three arrays (C, F, K). Roll is applied to x, y."""
         rel = pts - np.asarray(target)
-        return (np.einsum('fkc,qc->qfk', rel, v) for v in basis(az, el))
+        x, y, t = (np.einsum('fkc,qc->qfk', rel, v) for v in basis(az, el))
+        xr, yr = self._roll(x, y)
+        return xr, yr, t
 
     def _ov(self, pad):
         """Overflow allowed in action: OV_ACT, or what the hero padding itself overfills (+ 4 %) when that is more."""
@@ -648,9 +686,11 @@ class Track:
         right, up, back = basis(az, el)
         rel = self.H - np.asarray(target)                                      # the hero pose(s), seen from each frame's angle
         xh, yh, th = (np.einsum('hkc,nc->nhk', rel, v).reshape(len(az), -1) for v in (right, up, back))
+        xh, yh = self._roll(xh, yh)
         r = _closed(xh, yh, th, tans, pad)
         rel = self.pts - np.asarray(target)
         x, y, t = (np.einsum('nkc,nc->nk', rel, v) for v in (right, up, back))
+        x, y = self._roll(x, y)
         ex = self._offscreen(x, y, t, r, tans, pad) if self.offscreen else self.exempt   # along the path of THIS camera
         act = ~ex & (~self.hero if self.loop else True)
         if not act.any():
@@ -681,7 +721,16 @@ class Track:
         self.offscreen = True
         d = self.fit(target, [az], [el], tans, pad, only_hero=True)
         x, y, t = (np.einsum('nkc,c->nk', self.pts - np.asarray(target), v[0]) for v in basis([az], [el]))
+        x, y = self._roll(x, y)
         self.exempt = self._offscreen(x, y, t, np.full(len(self.pts), d), tans, pad)
+
+    def ortho_scale(self, target, az, el, tans, pad):
+        """Orthographic scale for the given az, el (radians, scalars) covering ALL frames of self.pts with padding `pad`.
+        Returns the ortho_scale (width of the longer side of the image in world units)."""
+        x, y, _ = self._coords(self.pts, target, np.atleast_1d(az), np.atleast_1d(el))
+        tx, ty = tans
+        t = max(tx, ty)
+        return float(2 * t * max(np.abs(x).max() / tx, np.abs(y).max() / ty) / (1 - pad))
 
 
 def _samples(v, step):

@@ -50,6 +50,7 @@ def _light(scene, rig, spec, index, size, receivers=None, key='lights', prefix='
     pos = _polar(spec['az'], spec['el'], spec['dist_f'] * size)
     tgt = _polar(*spec['aim'][:2], spec['aim'][2] * size) if spec.get('aim') else Vector()   # default: the product centre
     data['pms_base'] = [data.energy, *data.color]            # live Power / Tint multiply these (live.scale_lights)
+    data['pms_role'] = spec.get('role', 'light')
     ob = core.link(scene, key, bpy.data.objects.new(data.name, data))
     ob.parent = rig
     ob.location = pos
@@ -101,11 +102,12 @@ def backdrop_receivers(scene):
 def link_mirror_floor(scene):
     """Over a mirror floor the product lights do not light the floor: a mirror has no diffuse, so the only thing they would add is
     the sharp reflection of their own shape (white boxes on the horizon, with a low camera). The floor still mirrors the product
-    and the backdrop. Called by this builder and by the floor builder (a floor change does not rebuild the lights)."""
+    and the backdrop. Called by this builder and by the floor builder (a floor change does not rebuild the lights).
+    Also applies when floor has no_light_reflections=True (dark glossy floors where light reflections make white rectangles)."""
     if 'lighting' in core._PROTECTED:
         return
     _, data = core.preset(scene, 'floor')
-    mirror = data.get('kind') == 'plane' and data.get('metallic', 0.0) >= 0.5
+    mirror = data.get('kind') == 'plane' and (data.get('metallic', 0.0) >= 0.5 or data.get('no_light_reflections', False))
     coll = bpy.data.collections.get(core.NO_FLOOR)
     if mirror:
         coll = coll or bpy.data.collections.new(core.NO_FLOOR)

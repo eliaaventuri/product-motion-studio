@@ -61,7 +61,7 @@ ACTION_S = {
     'pop_in_reveal': (0.5, 1.4), 'scale_up_reveal': (0.5, 1.5), 'spin_in_reveal': (0.8, 2.0),
     'rise_from_below': (0.45, 1.8), 'slide_in': (0.7, 1.8), 'slide_in_right': (0.7, 1.8),
     'slide_in_top': (0.7, 1.9), 'unfold_tilt_reveal': (0.8, 2.0), 'soft_scale_reveal': (0.9, 2.4),
-    'tilt_reveal': (0.8, 2.0),
+    'tilt_reveal': (0.8, 2.0), 'exploded_z_reveal': (0.05, 0.5),
     'drop_impact': (0.5, 1.5), 'drop_straight': (0.5, 1.4), 'drop_bounce': (0.7, 1.8), 'slam_from_above': (0.4, 1.4),
     'drop_tilted': (0.5, 1.5), 'heavy_land': (0.9, 2.2),
     'flip': (0.8, 2.2), 'flip_back': (0.8, 2.2), 'flip_side': (0.8, 2.2), 'flip_180_reveal': (0.8, 2.2),
@@ -71,11 +71,14 @@ ACTION_S = {
     'showcase_3_pose': (2.0, 12.0),
     'exit_and_return': (2.0, 5.0), 'exit_up_and_return': (2.0, 5.0), 'tilt_to_hero': (0.7, 2.2),
     'spin_down_to_hero': (1.2, 3.0),
+    'slide_in_left': (0.7, 1.8), 'slide_in_bottom': (0.7, 1.8), 'spring_overshoot_settle': (1.0, 2.0),
+    'pendulum_damped_settle': (2.0, 3.0),
 }
 # declared contacts / hard stops: the velocity may jump at the contact frame (arrival WITHOUT ease, then recoil)
 IMPACTS = {'drop_impact', 'drop_straight', 'drop_bounce', 'slam_from_above', 'drop_tilted', 'heavy_land', 'flip',
            'flip_back', 'flip_side', 'flip_180_reveal', 'coin_flip', 'glitch_step', 'bounce_loop', 'magnetic_snap',
-           'tumble_settle', 'exit_up_and_return', 'snap_turns_90', 'slide_in_top'}
+           'tumble_settle', 'exit_up_and_return', 'snap_turns_90', 'slide_in_top', 'beat_pulse_120bpm',
+           'exploded_z_reveal'}
 # declared exceptions of single checks: check -> ids
 EXEMPT = {'floor': {'rise_from_below'}, 'hold': {'static'}, 'settle': {'glitch_step', 'showcase_3_pose'}}
 # declared cuts: the product leaves the frame and re-enters from the other side (the jump happens out of frame); the steps

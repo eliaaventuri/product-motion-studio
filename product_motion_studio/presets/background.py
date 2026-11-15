@@ -7,7 +7,10 @@ SCHEMA   register('background', id, name, category, desc, data=dict(
                                                   (radial gradients: 0 = centre),
              gradient=dict(type='linear'|'radial', rotation=deg, center=(u, v)),
              roughness=0..1, self_light=emission strength (0 = lit only by the lights),
-             world_fill=(strength, (r, g, b)) optional: ambient the product reflects, for backdrops with nothing around it (image plates)))
+             world_fill=(strength, (r, g, b)) optional: ambient the product reflects, for backdrops with nothing around it (image plates),
+             surface='travertine'|'concrete'|'fluted'|'silk' optional: procedural surface on the backdrop (cyclorama/studio360 only),
+             stage=dict(type='plinth_round'|'plinth_box'|'steps', height_f=0.35, color=(r,g,b) or None, roughness=0.5) optional:
+                  podium/steps under the product (cyclorama/studio360 only)))
 RULES    - Sizes come from the product size (see build_background.layout); never put absolute lengths here.
          - Keep colours dark/mid (albedo 0.1-0.45): the lights lift them. Higher albedo clips on AgX.
          - The 'floor' section decides if the floor is part of this mesh (floor 'seamless') or a separate plane.
@@ -146,6 +149,51 @@ _cyc('cyclorama_dusty_rose', 'Cyclorama Dusty Rose', 'colour',
 _cyc('cyclorama_warm_clay', 'Cyclorama Warm Clay', 'studio',
      'Darker warm clay-brown paper that is lit rather than glowing: food and objects lit from the side stand out against it.',
      '#9C7D55', '#7E6343', '#3E2F20', self_light=0.12)
+
+
+# === New backdrops with surface and stage ===================================================
+
+register('background', 'arch_plinth_pedestal', 'Arch Plinth Pedestal', 'studio',
+         'Grey cyclorama on a round plinth pedestal.',
+         data=dict(kind='cyclorama', roughness=0.9, self_light=0.0,
+                   gradient=dict(type='linear', rotation=0),
+                   stops=[(0.0, (0.34, 0.34, 0.35)), (0.55, (0.30, 0.30, 0.31)), (1.0, (0.12, 0.12, 0.13))],
+                   stage=dict(type='plinth_round', height_f=0.35, color=(0.42, 0.41, 0.40), roughness=0.55)))
+
+register('background', 'fluted_ribbed_wall', 'Fluted Ribbed Wall', 'material',
+         'Warm beige cyclorama with a fluted ribbed wall surface.',
+         data=dict(kind='cyclorama', roughness=0.85, self_light=0.0,
+                   gradient=dict(type='linear', rotation=0),
+                   stops=[(0.0, (0.38, 0.31, 0.23)), (0.55, (0.32, 0.26, 0.19)), (1.0, (0.25, 0.20, 0.15))],
+                   surface='fluted'))
+
+register('background', 'stepped_gallery_stage', 'Stepped Gallery Stage', 'stage',
+         'Light grey cyclorama with a stepped gallery stage.',
+         data=dict(kind='cyclorama', roughness=0.7, self_light=0.0,
+                   gradient=dict(type='linear', rotation=0),
+                   stops=[(0.0, (0.50, 0.50, 0.51)), (0.55, (0.44, 0.44, 0.45)), (1.0, (0.22, 0.22, 0.23))],
+                   stage=dict(type='steps', height_f=0.36, color=None, roughness=0.7)))
+
+register('background', 'travertine_stone_studio', 'Travertine Stone Studio', 'material',
+         'Ivory-sand cyclorama with a travertine stone surface.',
+         data=dict(kind='cyclorama', roughness=0.85, self_light=0.0,
+                   gradient=dict(type='linear', rotation=0),
+                   stops=[(0.0, (0.38, 0.33, 0.26)), (0.55, (0.30, 0.26, 0.20)), (1.0, (0.16, 0.14, 0.11))],
+                   surface='travertine'))
+
+register('background', 'brushed_concrete_brutalist', 'Brushed Concrete Brutalist', 'material',
+         'Cement grey cyclorama with a brushed concrete surface.',
+         data=dict(kind='cyclorama', roughness=0.85, self_light=0.0,
+                   gradient=dict(type='linear', rotation=0),
+                   stops=[(0.0, (0.26, 0.26, 0.26)), (0.55, (0.20, 0.20, 0.20)), (1.0, (0.09, 0.09, 0.09))],
+                   surface='concrete'))
+
+register('background', 'satin_silk_drape', 'Satin Silk Drape', 'material',
+         'Pink champagne cyclorama with a silk drape surface.',
+         data=dict(kind='cyclorama', roughness=0.3, self_light=0.0,
+                   gradient=dict(type='linear', rotation=0),
+                   stops=[(0.0, (0.40, 0.30, 0.27)), (0.55, (0.32, 0.22, 0.20)), (1.0, (0.12, 0.08, 0.07))],
+                   surface='silk'))
 
 
 # CYCLES COMPENSATION: Cycles has the studio's bounces and Eevee has not, so build_compositing.CYCLES_EV takes half a stop off every

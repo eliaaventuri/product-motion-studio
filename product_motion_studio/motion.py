@@ -77,20 +77,45 @@ def ease_in_out(obj):
 
 # === internal key helpers ===================================================
 
+def _resolve_path(idb, path):
+    """Resolve a dotted path (e.g. 'dof.focus_distance') on idb, returning (parent, attr)."""
+    parts = path.split('.')
+    for p in parts[:-1]:
+        idb = getattr(idb, p)
+    return idb, parts[-1]
+
+
 def _is_scalar(idb, path):
-    return isinstance(getattr(idb, path), (int, float))
+    parent, attr = _resolve_path(idb, path)
+    return isinstance(getattr(parent, attr), (int, float))
 
 
 def _getval(idb, path, index):
-    v = getattr(idb, path)
+    parent, attr = _resolve_path(idb, path)
+    v = getattr(parent, attr)
     return v if _is_scalar(idb, path) else v[index]
 
 
 def _setval(idb, path, index, value):
+    parent, attr = _resolve_path(idb, path)
     if _is_scalar(idb, path):
-        setattr(idb, path, value)
+        setattr(parent, attr, value)
     else:
-        getattr(idb, path)[index] = value
+        getattr(parent, attr)[index] = value
+
+
+def remove_fcurves(idb, path):
+    """Remove the F-Curves of a data path (every index) from an ID's action, leaving its other curves alone."""
+    adt = idb.animation_data
+    if not (adt and adt.action):
+        return
+    for layer in adt.action.layers:
+        for strip in layer.strips:
+            bags = [strip.channelbag(adt.action_slot)] if adt.action_slot is not None else list(strip.channelbags)
+            for cb in bags:
+                if cb:
+                    for fc in [fc for fc in cb.fcurves if fc.data_path == path]:
+                        cb.fcurves.remove(fc)
 
 
 def _fcurve(idb, path, index=0):

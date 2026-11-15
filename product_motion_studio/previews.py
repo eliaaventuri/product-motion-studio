@@ -6,14 +6,20 @@ import bpy
 import bpy.utils.previews
 from . import presets
 
-SECTIONS = ('product_motion', 'camera_shot', 'camera_motion', 'lighting', 'background', 'background_light', 'look', 'recipe')
+SECTIONS = ('product_motion', 'camera_shot', 'camera_motion', 'lighting', 'background', 'background_light', 'look', 'recipe',
+            'floor', 'format')
 DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'thumbs')
 _pcoll = None
 _user = None                                    # personal presets and scenes (user_presets.py): thumbnails in the user folder
 
 
+def filename(preset_id):
+    """Filename for a preset thumbnail (colons replaced for Windows compatibility)."""
+    return preset_id.replace(':', 'x') + '.jpg'
+
+
 def path(section, preset_id):
-    return os.path.join(DIR, section, preset_id + '.jpg')
+    return os.path.join(DIR, section, filename(preset_id))
 
 
 def icon(section, preset_id):

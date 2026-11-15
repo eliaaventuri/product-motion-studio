@@ -610,7 +610,8 @@ def t_catalog():
     runpy.run_path(os.path.join(HERE, '..', 'tools', 'export_catalog.py'), run_name='cat')
     text = open(out).read()
     assert 'user_catalogue' not in text and 'Catalogue Test' not in text and 'My Presets' not in text and 'user_scene' not in text
-    assert 'Total presets: 253' in text, re.search(r'Total presets: \d+', text).group(0)
+    n_stock = sum(1 for sec in presets.SECTIONS for pid in presets.REGISTRY[sec] if not pid.startswith('user_'))
+    assert f'Total presets: {n_stock}.' in text, (n_stock, re.search(r'Total presets: \d+', text).group(0))
     st = api.state()['user']
     assert st['presets'] == {'product_motion': 1, 'lighting': 1} and st['scenes'] == 1, st
     assert not any(f.startswith(user_presets.PKG_DIR) for f in (m.meta.get('file') or '' for m in user_presets.user_presets()))
@@ -692,6 +693,31 @@ def t_fps_seconds():
     else:
         raise AssertionError("no error")
     return "96 f @24 -> 120 f @30 -> 96 f @24"
+
+
+@test("15 a build that fails with personal scenes saved but none chosen: every setting goes back, no second error")
+def t_rollback_no_scene():
+    import contextlib
+    import io
+    sc = fresh()
+    p = cube(0.2, (0, 0, 0.1))
+    api.build(objects=[p], **W)
+    api.save_scene('Rollback Test', thumbnail=False)
+    sc.pms.property_unset('user_scene')                     # as in a new file: personal scenes exist, none is chosen
+    assert sc.pms.user_scene == '', sc.pms.user_scene
+    before = api._snapshot(sc.pms)
+    other = next(k for k in presets.REGISTRY['lighting'] if k != sc.pms.lighting)
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        msg = raises(RuntimeError, api.build, objects=[], lighting=other, **W)
+    after = api._snapshot(sc.pms)
+    clean_user()
+    assert 'no product' in msg, msg
+    assert 'Traceback' not in err.getvalue(), err.getvalue()[-400:]
+    diff = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+    assert not diff, [(k, before.get(k), after.get(k)) for k in diff]
+    assert bpy.data.objects.get(core.ROOT_NAME), "the previous build was removed"
+    return f"lighting back to {sc.pms.lighting}, no error while restoring"
 
 print("RESULTS")
 bad = 0

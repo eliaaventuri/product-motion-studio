@@ -70,3 +70,21 @@ _r('social_9x16_punchy', 'Social 9:16 Punchy', 'social', 'Vertical, a rich cobal
 _r('turntable_catalogue', 'Turntable Catalogue', 'catalogue', 'Neutral graphite-grey sweep, even light, a seamless looping 360 turn from a slightly high angle: the standard product turntable.',
    'spin_360_loop', 'high_34', 'static', 'packaging_flat_even', 'cyclorama_graphite', 'none', 'seamless', 'neutral_delivery',
    '16:9', 240, product_types=['packaging', 'tech', 'cosmetics', 'food'])
+_r('craft_spirits_amber', 'Craft Spirits Amber', 'luxury', 'Glossy black sweep, a warm light through the bottle, rippling caustics on the backdrop and a film halation: whisky, rum and craft spirits.',
+   'luxury_drift', 'hero_34', 'push_in_slow', 'glass_backlit_warm', 'cyclorama_gloss_black', 'water_caustics_wash', 'glossy',
+   'cinestill_800t_halation', '16:9', 240, product_types=['glass', 'food'], cycles_ev=-0.15)
+_r('eyewear_acetate_sun', 'Eyewear Acetate Sun', 'lifestyle', 'Sky-blue sweep, a bright clean field that draws the lenses and the acetate edges, frosted acrylic floor and a short orbit: sunglasses and eyewear.',
+   'tilt_reveal', 'hero_34', 'orbit_45_right', 'glass_bright_field', 'cyclorama_pastel_sky', 'none', 'frosted_acrylic_matte',
+   'clean_commercial', '1:1', 180, product_types=['glass', 'metal'], cycles_ev=-0.55)
+_r('gaming_rgb_hardware', 'Gaming RGB Hardware', 'tech', 'Three RGB lights, a neon bar on the horizon and wet asphalt, a dutch angle and a helical push: gaming mice, headsets and keyboards.',
+   'spin_in_reveal', 'dutch_tilt_dynamic', 'helical_push_orbit', 'cyber_rgb_triad', 'cyclorama_noir_graphite', 'horizon_neon_bar',
+   'wet_asphalt_micro', 'neon_night', '16:9', 180, product_types=['tech'], cycles_ev=0.15)
+_r('architectural_decor', 'Architectural Decor', 'lifestyle', 'Soft north-window light, travertine and leaf shadows on the wall, a slow drift seen with a tele lens: vases, lamps and design objects.',
+   'drift_yaw_slow', 'packshot_tele_85mm', 'push_in_slow', 'overcast_north_window', 'travertine_stone_studio', 'botanical_leaf_gobo',
+   'matte', 'kodak_portra_creamy', '4:5', 240, product_types=['glass', 'metal', 'packaging'], cycles_ev=-0.4)
+_r('sport_supplement_bold', 'Sport Supplement Bold', 'social', 'Hard strips on raw concrete, the product slams down seen from below and the camera pushes fast, vertical and punchy: protein, energy drinks, sport.',
+   'slam_from_above', 'low_angle', 'push_in_fast', 'hard_strips', 'brushed_concrete_brutalist', 'split_duotone_cross', 'matte',
+   'punchy_agx', '9:16', 120, product_types=['packaging', 'food'], cycles_ev=-0.5)
+_r('diamond_ring_macro', 'Diamond Ring Macro', 'luxury', 'Sparkling dome light on black glass, a tele crop on the stone and an eased loop turn with a locked camera: rings and fine jewellery.',
+   'spin_360_eased_loop', 'detail_corner_crop', 'static', 'jewel_dome_sparkle', 'cyclorama_gloss_black', 'none',
+   'obsidian_black_glass', 'jewel_sparkle', '1:1', 240, product_types=['jewellery', 'metal'])

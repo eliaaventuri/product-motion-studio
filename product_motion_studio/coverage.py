@@ -41,12 +41,21 @@ def check(scene):
         dg = bpy.context.evaluated_depsgraph_get()
         cam_eval = cam.evaluated_get(dg)
         tx, ty = core.frame_tans(scene, cam_eval.data.lens)
+        cd, tm = cam_eval.data, max(tx, ty)
         mw = cam_eval.matrix_world
         trees = [(BVHTree.FromObject(o, dg), o.evaluated_get(dg).matrix_world.inverted()) for o in obs]
         miss = 0
         for x, y in grid:
-            d = mw.to_3x3() @ Vector((x * tx, y * ty, -1.0))
-            if not any(t.ray_cast(inv @ mw.translation, (inv.to_3x3() @ d).normalized())[0] is not None
+            if cd.type == 'ORTHO':                                     # parallel rays from the film plane
+                k = cd.ortho_scale / (2 * tm)
+                origin_local = Vector((x * tx * k + cd.shift_x * cd.ortho_scale, y * ty * k + cd.shift_y * cd.ortho_scale, 0.0))
+                dir_local = Vector((0.0, 0.0, -1.0))
+            else:
+                origin_local = Vector((0, 0, 0))
+                dir_local = Vector((x * tx + 2 * tm * cd.shift_x, y * ty + 2 * tm * cd.shift_y, -1.0))   # lens shift: long side units
+            origin = mw @ origin_local
+            d = mw.to_3x3() @ dir_local
+            if not any(t.ray_cast(inv @ origin, (inv.to_3x3() @ d).normalized())[0] is not None
                        for t, inv in trees):
                 miss += 1
         if miss:

@@ -11,6 +11,7 @@
     pms.apply_recipe('luxury_perfume', shot='macro')   # a complete style (motion, shot, lights, background, look, format, duration)
     pms.set_live(cam_lens=100, cam_padding=-0.3, light_power=1.5, look_intensity=0.7)   # live controls (see live.py)
     pms.set_render('FINAL', fmt='MP4', mode='animation')   # Render panel settings (nothing is rendered)
+    pms.render_pack('angles', shots=['front', 'side'])   # Render pack: same studio, multiple times (then restored)
     pms.preview_start('product_motion', 'flip'); pms.preview_stop()   # Preview Motion logic (the panel plays it)
     pms.save_preset('lighting', 'My Key Light'); pms.save_scene('Hero look')   # personal presets / scenes (user_presets.py)
     pms.apply_scene('user_scene_hero_look'); pms.list_user(); pms.export_user(path); pms.import_user(path)
@@ -58,12 +59,14 @@ DEPENDENTS = {
     'look': ('compositing',),
 }
 CHECK_AFTER = {'prepare', 'format', 'animation', 'camera', 'background', 'floor'}   # steps that can leave the frame uncovered
-GLOBALS = ('duration', 'fps', 'frame_start', 'engine', 'ground', 'animate_lighting', 'bg_image', 'isolate_lights')
+GLOBALS = ('duration', 'fps', 'frame_start', 'engine', 'ground', 'animate_lighting', 'bg_image', 'isolate_lights',
+           'motion_loop', 'motion_intro_s')
 TIME = ('duration', 'fps', 'frame_start')
 # global setting -> steps to rebuild (the time settings add 'lighting' when the highlight sweep is on: see _global_steps)
 GLOBAL_STEPS = {'duration': ('format', 'animation', 'camera'), 'fps': ('format', 'animation', 'camera'),
                 'frame_start': ('format', 'animation', 'camera'), 'engine': ('format',), 'ground': STEPS,
-                'animate_lighting': ('lighting',), 'bg_image': ('background', 'floor'), 'isolate_lights': ('lighting',)}
+                'animate_lighting': ('lighting',), 'bg_image': ('background', 'floor'), 'isolate_lights': ('lighting',),
+                'motion_loop': ('format', 'animation', 'camera'), 'motion_intro_s': ('format', 'animation', 'camera')}
 # value checks for overrides (same names in presets' data and in the global settings)
 CHECKS = {'lens': (lambda v: v > 0, "lens must be > 0 (mm)"),
           'padding': (lambda v: -0.5 <= v <= 0.9, "padding must be between -0.5 and 0.9 (negative = deliberate crop)"),
@@ -72,7 +75,8 @@ CHECKS = {'lens': (lambda v: v > 0, "lens must be > 0 (mm)"),
           'el': (lambda v: -89 <= v <= 89, "el (elevation, degrees) must be between -89 and 89"),
           'duration': (lambda v: v >= 12 and v == int(v), "duration must be an integer >= 12"),
           'fps': (lambda v: 1 <= v <= 120 and v == int(v), "fps must be an integer between 1 and 120"),
-          'frame_start': (lambda v: v >= 0 and v == int(v), "frame_start must be an integer >= 0")}
+          'frame_start': (lambda v: v >= 0 and v == int(v), "frame_start must be an integer >= 0"),
+          'motion_intro_s': (lambda v: v >= 0.5, "motion_intro_s must be >= 0.5 (seconds)")}
 _PREVIEW = {}                                                # the Preview Motion in progress (see preview_start)
 RECIPE_FIELDS = ('product_motion', 'camera_shot', 'camera_motion', 'lighting', 'background', 'background_light', 'floor',
                  'look', 'format', 'duration')
@@ -135,6 +139,11 @@ def _globals(pms, glob):
             if not _isnum(v) or v != int(v):
                 raise ValueError(f"{k} must be an integer, not {v!r}")
             v = int(v)
+        elif prop.type == 'FLOAT':
+            v = _loose(v)
+            if not _isnum(v):
+                raise ValueError(f"{k} must be a number, not {v!r}")
+            v = float(v)
         elif prop.type == 'ENUM':
             ids = [i.identifier for i in prop.enum_items]
             if v not in ids:
@@ -199,9 +208,12 @@ def _unknown(section, override, res):
 
 def _snapshot(pms):
     """Every property of scene.pms (choices, settings, overrides, coverage, live values). Arrays are copied: the live
-    colours would otherwise read back their current value."""
-    snap = {k: getattr(pms, k) for k in pms.bl_rna.properties.keys() if k != 'rna_type'}
-    return {k: tuple(v) if hasattr(v, '__len__') and not isinstance(v, str) else v for k, v in snap.items()}
+    colours would otherwise read back their current value. A dynamic enum whose stored number matches none of its items
+    (My Scenes in a new file, with personal scenes saved) reads '' and cannot be set back: it is left out."""
+    rna = pms.bl_rna.properties
+    snap = {k: getattr(pms, k) for k in rna.keys() if k != 'rna_type'}
+    snap = {k: v for k, v in snap.items() if not (v == '' and rna[k].type == 'ENUM')}
+    return {k: tuple(v) if hasattr(v, '__len__') and not isinstance(v, (str, set)) else v for k, v in snap.items()}
 
 
 def _global_steps(pms, key):
@@ -349,12 +361,15 @@ def on_setting_changed(scene, key):
         traceback.print_exc()
 
 
-def list_presets(section=None):
-    """{section: [(id, name, category), ...]} (or just one section)."""
+def list_presets(section=None, search=None):
+    """{section: [(id, name, category), ...]} (or just one section).
+    search: if given, only presets where props.matches(p, search) is True."""
+    from . import props
     if section is not None and section not in presets.REGISTRY:
         raise ValueError(f"unknown section {section!r}; available: {list(presets.SECTIONS)}")
     secs = [section] if section else presets.SECTIONS
-    return {s: [(p.id, p.name, p.category) for p in presets.REGISTRY[s].values() if not p.meta.get('hidden')] for s in secs}
+    return {s: [(p.id, p.name, p.category) for p in presets.REGISTRY[s].values()
+                if not p.meta.get('hidden') and props.matches(p, search)] for s in secs}
 
 
 def _summary(scene, out):
@@ -370,10 +385,14 @@ def _summary(scene, out):
 def build(objects=None, shot='hero_34', product_motion='luxury_drift', camera_motion='push_in',
           lighting='beauty_soft', animate_lighting=False, background='cyclorama_studio_grey',
           floor='seamless', format='16:9', look='clean_commercial', duration=200, fps=None,
-          engine='KEEP', ground=True, bg_image='', isolate_lights=True, force=False, background_light='none'):
+          engine='KEEP', ground=True, bg_image='', isolate_lights=True, force=False, background_light='none',
+          keep=(), motion_loop=None, motion_intro_s=None):
     """Build the whole studio. objects=None: selected objects, or the already prepared product.
     fps=None: the scene's fps (first build) / the current setting; engine='KEEP': the scene's render engine.
-    A section edited by hand is not rebuilt (warning) unless force=True."""
+    A section edited by hand is not rebuilt (warning) unless force=True.
+    keep: iterable of section names to keep as they are (their overrides and live values are preserved).
+    motion_loop: 'NONE' or a loop preset id (None = keep current setting).
+    motion_intro_s: intro length in seconds (None = keep current setting)."""
     scene = _scene()
     pms = core.settings(scene)
     core.claim_scene(scene)
@@ -382,20 +401,36 @@ def build(objects=None, shot='hero_34', product_motion='luxury_drift', camera_mo
                   format=format, look=look)
     for section, pid in choice.items():
         presets.get(section, pid)                                  # validate before touching the scene
+    keep = set(keep)
+    kept = {s: core.overrides(scene, s) for s in keep}
     glob = dict(duration=duration, engine=engine, ground=ground, animate_lighting=animate_lighting,
                 bg_image=bg_image, isolate_lights=isolate_lights)
     if fps is not None:
         glob['fps'] = fps
+    if motion_loop is not None:
+        glob['motion_loop'] = motion_loop
+    if motion_intro_s is not None:
+        glob['motion_intro_s'] = motion_intro_s
     glob = _globals(pms, glob)
     core.begin(scene)                                              # first build: fps / frame_start come from the scene
     snap = _snapshot(pms)
-    with core.quiet():
-        for section, pid in choice.items():
-            props.assign(pms, section, pid)
-        for k, v in glob.items():
-            setattr(pms, k, v)
-        pms.overrides = '{}'
-        live.forget(scene)                                         # every live control starts from its preset's defaults
+    try:
+        with core.quiet():
+            for section, pid in choice.items():
+                props.assign(pms, section, pid)
+            for k, v in glob.items():
+                setattr(pms, k, v)
+            pms.overrides = '{}'
+            for s, v in kept.items():
+                core.set_overrides(scene, s, v)
+            forget = [s for s in live.GROUPS if s not in keep]
+            if forget:
+                live.forget(scene, forget)
+    except Exception:
+        with core.quiet():
+            for k, v in snap.items():
+                props.assign(pms, k, v)
+        raise
     root = bpy.data.objects.get(core.ROOT_NAME)
     full = objects is not None or root is None or bool(root.get('pms_ground', True)) != bool(ground)
     return _summary(scene, run(STEPS if full else STEPS[1:], objects, scene, force, snap))
@@ -498,6 +533,7 @@ def state():
     d = {s: getattr(pms, s) for s in presets.SECTIONS}
     d.update(duration=pms.duration, fps=pms.fps, frame_start=pms.frame_start, engine=pms.engine, ground=pms.ground,
              animate_lighting=pms.animate_lighting, bg_image=pms.bg_image, isolate_lights=pms.isolate_lights,
+             motion_loop=pms.motion_loop, motion_intro_s=pms.motion_intro_s,
              overrides=json.loads(pms.overrides), coverage=pms.coverage, prepared=root is not None,
              camera=cam.name if cam else None, frame_range=(scene.frame_start, scene.frame_end),
              modified=modified_steps(set(STEPS), scene), live=live.values(scene), built=_loads(pms.built),
@@ -512,11 +548,14 @@ def state():
 
 # === recipes, live controls, preview, render =================================
 
-def apply_recipe(recipe_id, *, force=False, objects=None, **override):
+def apply_recipe(recipe_id, *, force=False, objects=None, keep=None, **override):
     """Apply a scene recipe: a complete style (product motion, shot, camera motion, lighting, background, background light,
     floor, look, format, duration) in one go. Overrides replace single fields of the recipe (shot='macro', look='noir',
     duration=120, animate_lighting=True ...). The product must be prepared (or selected / passed as objects). The engine,
-    ground, fps, background image and isolate-lights settings are kept as they are."""
+    ground, fps, background image and isolate-lights settings are kept as they are.
+    keep: iterable of section names to keep as they are (the panel's locks are used by default).
+    For kept sections, the current choice wins over the recipe and over an override of that field."""
+    from . import props
     scene = _scene()
     pms = core.settings(scene)
     r = dict(presets.get('recipe', recipe_id).data)
@@ -527,14 +566,22 @@ def apply_recipe(recipe_id, *, force=False, objects=None, **override):
             r[key] = override.pop(k)
     if override:
         raise ValueError(f"unknown overrides for the recipe: {sorted(override)}; valid: {list(RECIPE_FIELDS) + ['shot', 'animate_lighting']}")
+    keep = set(pms.locks) if keep is None else set(keep)
+    bad = [s for s in keep if s not in props.LOCKABLE]
+    if bad:
+        raise ValueError(f"keep: unknown sections {sorted(bad)}; valid: {list(props.LOCKABLE)}")
+    for s in keep:
+        r[s] = getattr(pms, s)
     out = build(objects=objects, shot=r['camera_shot'], product_motion=r['product_motion'], camera_motion=r['camera_motion'],
                 lighting=r['lighting'], background=r['background'], background_light=r['background_light'], floor=r['floor'],
                 format=r['format'], look=r['look'], duration=r['duration'], animate_lighting=r['animate_lighting'],
-                engine=pms.engine, ground=pms.ground, bg_image=pms.bg_image, isolate_lights=pms.isolate_lights, force=force)
+                engine=pms.engine, ground=pms.ground, bg_image=pms.bg_image, isolate_lights=pms.isolate_lights, force=force,
+                keep=keep)
     with core.quiet():
         props.assign(pms, 'recipe', recipe_id)
     build_compositing.sync_ev(scene)                    # the recipe's own cycles_ev (if any) counts from now on
     out['recipe'] = recipe_id
+    out['kept'] = sorted(keep)
     return out
 
 
@@ -579,6 +626,43 @@ def set_render(quality=None, motion_blur=None, path=None, fmt=None, mode=None, e
         if fmt is not None:
             pms.render_format = fmt
     return render_settings.apply(scene, mode)
+
+
+def render_pack(kind, *, mode='still', shots=None, formats=None, variants=None, path=None, render=True, force=False):
+    """Render a pack: the same studio rendered several times and put back exactly as it was.
+
+    Kinds:
+      - 'angles': e-commerce shots front, hero_34, side, rear_34, top_down (camera motion held still).
+      - 'formats': the same shot in 16:9, 1:1, 9:16, re-framed for each.
+      - 'variants': every top-level object of a collection, one at a time, in place of the product.
+
+    Files (render=True):
+      Still:   <output folder>/pack_<kind>/<name>.png
+      Animation (VIDEO): <output folder>/pack_<kind>/<name>_####-####.mp4
+      Animation (PNG/EXR sequence): <output folder>/pack_<kind>/<name>/frame_####
+    render=False sets up every job without rendering (checks). Everything is put back at the end.
+
+    Returns {'kind': kind, 'folder': absolute path, 'jobs': [job dicts], 'warnings': []}.
+    """
+    from . import batch
+    scene = _scene()
+    core.settings(scene)
+    core.claim_scene(scene)
+    pack = batch.Pack(scene, kind, mode, shots, formats, variants, path, force)
+    jobs = []
+    try:
+        pack.begin()
+        for i in range(len(pack.items)):
+            job = pack.setup(i)
+            if render:
+                if mode == 'still':
+                    bpy.ops.render.render(write_still=True)
+                else:
+                    bpy.ops.render.render(animation=True)
+            jobs.append(job)
+    finally:
+        warnings = pack.end()
+    return {'kind': kind, 'folder': bpy.path.abspath(pack.base), 'jobs': jobs, 'warnings': warnings}
 
 
 def preview_start(section, preset_id=None, force=False):

@@ -292,10 +292,12 @@ def live_state():
 
 
 # ---------------------------------------------------------------------------------------------
-@test("2 background light: 6 presets, only the backdrop and floor, scaled with the product, rebuilt with background, live colour/power")
+@test("2 background light: 12 presets (6 with gobo / glow strip), only the backdrop and floor, scaled with the product, rebuilt with background, live colour/power")
 def background_light():
     reg = presets.REGISTRY['background_light']
-    assert sorted(reg) == sorted(['none', 'soft_wash', 'spot_pool', 'top_gradient', 'side_sweep', 'rim_glow']), sorted(reg)
+    assert sorted(reg) == sorted(['none', 'soft_wash', 'spot_pool', 'top_gradient', 'side_sweep', 'rim_glow', 'venetian_blinds_gobo',
+                                    'botanical_leaf_gobo', 'window_sunbeam_slash', 'water_caustics_wash', 'horizon_neon_bar',
+                                    'split_duotone_cross']), sorted(reg)
     assert not reg['none'].data['lights'] and all(reg[i].data['lights'] for i in reg if i != 'none')
     feats = {}
     for scale in (1.0, 0.01):
@@ -351,7 +353,7 @@ def background_light():
     clean()
     api.remove_all()
     assert not [o for o in bpy.data.objects if o.name.startswith('PMS_')] and 'PMS_BgLights' not in bpy.data.collections
-    return "6 presets, backdrop-only, scale free, rebuilt with background, live colour/power, hand edit flagged"
+    return "12 presets, backdrop-only, scale free, rebuilt with background, live colour/power, hand edit flagged"
 
 
 # ---------------------------------------------------------------------------------------------

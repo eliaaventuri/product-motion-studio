@@ -4,7 +4,7 @@ Background Light, Floor, Format, Look, Render) with their live controls, and the
 import textwrap
 import traceback
 import bpy
-from . import api, core, live, presets, previews, render_settings, user_presets
+from . import api, batch, core, live, presets, previews, props, render_settings, user_presets
 
 
 def _msg(e):
@@ -204,6 +204,114 @@ class PMS_OT_remove_all(bpy.types.Operator):
             traceback.print_exc()
             self.report({'ERROR'}, _msg(e))
             return {'CANCELLED'}
+        return {'FINISHED'}
+
+
+_PACK = {'rendering': False, 'cancelled': False}
+
+
+def _pack_done(*args):
+    _PACK['rendering'] = False
+
+
+def _pack_cancel(*args):
+    _PACK['rendering'] = False
+    _PACK['cancelled'] = True
+
+
+class PMS_OT_render_pack(bpy.types.Operator):
+    bl_idname, bl_label = "pms.render_pack", "Render Pack"
+    bl_description = ("Render the same studio several times in one go; everything is put back at the end. "
+                      "Esc stops after the current render")
+    bl_options = {'REGISTER', 'UNDO'}
+    force: bpy.props.BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})      # set by invoke after the user confirms
+
+    def _make(self, context):
+        pms = context.scene.pms
+        return batch.Pack(context.scene, pms.pack_kind.lower(),
+                          'still' if pms.pack_mode == 'STILL' else 'animation',
+                          variants=pms.pack_variants, force=self.force)
+
+    def invoke(self, context, event):
+        kind = context.scene.pms.pack_kind.lower()
+        mods = api.modified_steps(batch.GUARD[kind], context.scene)
+        if mods:
+            self.force = True
+            return context.window_manager.invoke_confirm(
+                self, event, title="Edited by hand",
+                message=api.modified_text(batch.GUARD[kind], context.scene),
+                confirm_text="Overwrite", icon='ERROR')
+        return self.execute(context)
+
+    def execute(self, context):
+        self.pack = None
+        try:
+            self.pack = self._make(context)
+            self.pack.begin()
+        except Exception as e:                                          # noqa: BLE001
+            traceback.print_exc()
+            if self.pack is not None:
+                self.pack.end()                                         # what begin() already changed goes back
+            self.report({'ERROR'}, _msg(e))
+            return {'CANCELLED'}
+        self.i = 0
+        self.stop = False
+        _PACK.update(rendering=False, cancelled=False)
+        bpy.app.handlers.render_complete.append(_pack_done)
+        bpy.app.handlers.render_cancel.append(_pack_cancel)
+        self.timer = context.window_manager.event_timer_add(0.5, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def modal(self, context, event):
+        if event.type == 'ESC' and event.value == 'PRESS':
+            self.stop = True
+        if event.type != 'TIMER':
+            return {'PASS_THROUGH'}
+        if _PACK['rendering'] or bpy.app.is_job_running('RENDER'):     # (the handlers alone can say "done" too early)
+            return {'PASS_THROUGH'}
+        if _PACK['cancelled'] or self.stop or self.i >= len(self.pack.items):
+            return self._finish(context)
+        try:
+            self.pack.setup(self.i)
+        except Exception as e:                                          # noqa: BLE001
+            traceback.print_exc()
+            self.report({'ERROR'}, _msg(e))
+            self.stop = True
+            return {'PASS_THROUGH'}
+        self.i += 1
+        _PACK['rendering'] = True
+        if self.pack.mode == 'still':                                   # (not the panel: it may change meanwhile)
+            res = bpy.ops.render.render('INVOKE_DEFAULT', write_still=True)
+        else:
+            res = bpy.ops.render.render('INVOKE_DEFAULT', animation=True)
+        if 'CANCELLED' in res:
+            _PACK['rendering'] = False
+            self.stop = True
+        return {'PASS_THROUGH'}
+
+    def _finish(self, context):
+        try:
+            if self.timer in context.window_manager.event_timers:
+                context.window_manager.event_timer_remove(self.timer)
+        except Exception:
+            pass
+        try:
+            if _pack_done in bpy.app.handlers.render_complete:
+                bpy.app.handlers.render_complete.remove(_pack_done)
+        except Exception:
+            pass
+        try:
+            if _pack_cancel in bpy.app.handlers.render_cancel:
+                bpy.app.handlers.render_cancel.remove(_pack_cancel)
+        except Exception:
+            pass
+        warns = self.pack.end()
+        for w in warns:
+            self.report({'WARNING'}, w)
+        done = self.i - (1 if _PACK['cancelled'] else 0)
+        self.report({'INFO'}, f"Render pack: {done} of {len(self.pack.items)} rendered in "
+                              f"{bpy.path.abspath(self.pack.base)}")
         return {'FINISHED'}
 
 
@@ -448,6 +556,9 @@ class PMS_PT_main(bpy.types.Panel):
         box.label(text="Recipe")
         _presets(box, pms, 'recipe')
         box.operator("pms.apply_recipe", text="Apply Recipe", icon='CHECKMARK')
+        if pms.locks:
+            kept_titles = [s.replace('_', ' ').title() for s in sorted(pms.locks)]
+            box.label(text="Kept: " + ", ".join(kept_titles), icon='LOCKED')
         _draw_scenes(self.layout, context)
         col = self.layout.column(align=True)
         row = col.row(align=True)
@@ -481,10 +592,23 @@ def _draw_1(self, context):
 
 def _presets(lay, pms, section, text="", ptype=False):
     """Category filter (+ product type for lighting), the thumbnail picker and the list of one section."""
+    if section in props.PLAIN:
+        lay.template_icon_view(pms, section, show_labels=True, scale=6, scale_popup=5)
+        row = lay.row(align=True)
+        row.prop(pms, section, text=text)
+        if section in props.LOCKABLE:
+            row.prop_enum(pms, 'locks', section, text="", icon='LOCKED' if section in pms.locks else 'UNLOCKED')
+        _hand_note(lay, pms, section)
+        return
     col = lay.column(align=True)
-    col.prop(pms, section + '_cat', text="Category")
+    row = col.row(align=True)
+    row.prop(pms, section + '_cat', text="Category")
+    if section in props.LOCKABLE:
+        row.prop_enum(pms, 'locks', section, text="", icon='LOCKED' if section in pms.locks else 'UNLOCKED')
     if ptype:
         col.prop(pms, 'lighting_ptype', text="Type")
+    if section in props.FILTERED:
+        col.prop(pms, section + '_find', text="", icon='VIEWZOOM')
     lay.template_icon_view(pms, section, show_labels=True, scale=6, scale_popup=5)
     lay.prop(pms, section, text=text)
     _hand_note(lay, pms, section)
@@ -531,6 +655,7 @@ def _live_camera(lay, context):
     sub.active = pms.cam_dof
     sub.prop(pms, "cam_fstop")
     sub.prop(pms, "cam_focus")
+    sub.prop(pms, "cam_autofocus")
 
 
 def _draw_2(self, context):
@@ -552,6 +677,9 @@ def _live_lighting(lay, context):
     col.prop(pms, "light_power")
     col.prop(pms, "light_tint")
     col.prop(pms, "light_rot")
+    col.prop(pms, "light_fill")
+    col.prop(pms, "light_rim")
+    col.prop(pms, "light_temp")
 
 
 def _live_background(lay, context):
@@ -568,6 +696,8 @@ def _live_background(lay, context):
             col.prop(pms, "bg_rotation")
     col.prop(pms, "bg_roughness")
     col.prop(pms, "bg_selflight")
+    col.prop(pms, "bg_distance")
+    col.prop(pms, "bg_cove")
 
 
 def _live_bg_light(lay, context):
@@ -600,9 +730,14 @@ def _draw_simple(prop, section, extra=(), live_fn=None, preview=False):
         if prop in previews.SECTIONS:
             _presets(self.layout, pms, prop, ptype=prop == 'lighting')
         else:
-            self.layout.prop(pms, prop, text="")
+            row = self.layout.row(align=True)
+            row.prop(pms, prop, text="")
+            if prop in props.LOCKABLE:
+                row.prop_enum(pms, 'locks', prop, text="", icon='LOCKED' if prop in pms.locks else 'UNLOCKED')
         _user_row(self.layout, pms, section)
         for e in extra:
+            if e == 'motion_intro_s' and pms.motion_loop == 'NONE':
+                continue
             if e == 'bg_image':
                 col = self.layout.column()
                 col.use_property_split, col.use_property_decorate = True, False
@@ -631,16 +766,38 @@ def _draw_render(self, context):
     col = lay.column(align=True)
     col.use_property_split, col.use_property_decorate = True, False
     col.prop(pms, "render_motion_blur")
-    col.prop(pms, "render_format")
+    sub = col.row()
+    sub.active = not pms.render_passes                       # the passes always go to a multilayer EXR
+    sub.prop(pms, "render_format")
+    col.prop(pms, "render_passes")
+    if pms.render_passes:
+        col.label(text="Output: multilayer EXR (passes + graded image)", icon='INFO')
     col.prop(pms, "render_path")
     col = lay.column(align=True)
     col.operator("pms.render", text="Render Still", icon='RENDER_STILL').mode = 'still'
     col.operator("pms.render", text="Render Animation", icon='RENDER_ANIMATION').mode = 'animation'
 
+    # Render Pack
+    box = lay.box()
+    box.label(text="Render Pack", icon='RENDER_RESULT')
+    box.row(align=True).prop(pms, "pack_kind", expand=True)
+    if pms.pack_kind == 'VARIANTS':
+        box.prop(pms, "pack_variants")
+    box.row(align=True).prop(pms, "pack_mode", expand=True)
+    if pms.pack_kind == 'ANGLES':
+        box.label(text="Front, Hero 3/4, Side, Rear 3/4, Top Down")
+    elif pms.pack_kind == 'FORMATS':
+        box.label(text="16:9, 1:1, 9:16")
+    else:
+        n = len(batch.variant_roots(pms.pack_variants)) if pms.pack_variants else 0
+        box.label(text=f"{n} objects")
+    box.operator("pms.render_pack", icon='RENDER_STILL')
+
 
 _SUBS = [("1. Prepare", _draw_1),
          ("2. Camera", _draw_2),
-         ("3. Product Motion", _draw_simple('product_motion', 'product_motion', preview=True)),
+         ("3. Product Motion", _draw_simple('product_motion', 'product_motion', ('motion_loop', 'motion_intro_s'),
+                                            preview=True)),
          ("4. Lighting", _draw_simple('lighting', 'lighting', ('animate_lighting', 'isolate_lights'), _live_lighting)),
          ("5. Background", _draw_simple('background', 'background', ('bg_image',), _live_background)),
          ("6. Background Light", _draw_simple('background_light', 'background_light', (), _live_bg_light)),
@@ -651,8 +808,8 @@ _SUBS = [("1. Prepare", _draw_1),
 
 _classes = [PMS_OT_build_all, PMS_OT_build_section, PMS_OT_add_objects, PMS_OT_apply_recipe, PMS_OT_preview_motion,
             PMS_OT_preview_apply, PMS_OT_preview_watch, PMS_OT_render, PMS_OT_remove_all,
-            PMS_OT_save_preset, PMS_OT_update_user, PMS_OT_rename_user, PMS_OT_delete_user, PMS_OT_save_scene,
-            PMS_OT_apply_scene, PMS_OT_reload_user, PMS_OT_export_user, PMS_OT_import_user, PMS_PT_main]
+            PMS_OT_render_pack, PMS_OT_save_preset, PMS_OT_update_user, PMS_OT_rename_user, PMS_OT_delete_user,
+            PMS_OT_save_scene, PMS_OT_apply_scene, PMS_OT_reload_user, PMS_OT_export_user, PMS_OT_import_user, PMS_PT_main]
 for _i, (_label, _draw) in enumerate(_SUBS, start=1):
     _classes.append(type(f"PMS_PT_sub{_i}", (bpy.types.Panel,), {
         'bl_idname': f"PMS_PT_sub{_i}", 'bl_label': _label, 'bl_space_type': 'VIEW_3D', 'bl_region_type': 'UI',

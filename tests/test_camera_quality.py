@@ -49,7 +49,10 @@ FAMILY = dict(static='hold', push_in='dolly', pull_back='dolly', orbit_90='orbit
               orbit_45_left='orbit', orbit_45_right='orbit', orbit_90_left='orbit', orbit_180_right='orbit',
               orbit_rise='orbit', top_down_spiral='orbit', pendulum='orbit', arc_push='orbit',
               whip_orbit_finale='whip', crane_down='crane', low_angle_hero_rise='crane', pedestal_rise='slide',
-              truck_right='slide', dolly_zoom='lens', rack_focus='rack', handheld='handheld')
+              truck_right='slide', truck_left='slide',
+              dolly_zoom='lens', rack_focus='rack', handheld='handheld',
+              telephoto_snap_zoom='lens', micro_breathing_macro='handheld',
+              helical_push_orbit='orbit', crane_to_zenith_90='crane')
 CROPPED_SHOTS = ('macro', 'macro_side', 'profile_tight')       # shots that crop the product on purpose (padding < 0.05)
 PAIRS = [('spin_360_loop', 'orbit_360_loop'), ('drop_impact', 'push_in'), ('luxury_drift', 'arc_push'),
          ('flip', 'crane_up'), ('pop_in_reveal', 'pull_back_reveal'), ('fly_by_swoop', 'static')]
@@ -139,11 +142,11 @@ def t3():
     return bad, f"worst overflow {worst:.1%}"
 
 
-@test(4, "lens and focus change only in dolly_zoom / rack_focus; both are really visible")
+@test(4, "lens and focus change only in dolly_zoom / rack_focus / telephoto_snap_zoom; both are really visible")
 def t4():
     bad = []
     for pid, shot, dur, v in cases():
-        if pid != 'dolly_zoom' and v['lens_range'] > LENS_STILL:
+        if pid not in ('dolly_zoom', 'telephoto_snap_zoom') and v['lens_range'] > LENS_STILL:
             bad.append(f"{pid}/{shot}/{dur} lens moves {v['lens_range']:.2f} mm")
         if pid != 'rack_focus' and v['focus_shift'] > FOCUS_STILL:
             bad.append(f"{pid}/{shot}/{dur} focus moves {v['focus_shift']:.3f}")
@@ -153,6 +156,12 @@ def t4():
         if pid == 'rack_focus' and dur >= 96:
             if v['focus_shift'] < RACK_SHIFT_MIN or v['rack_a'] < RACK_BLUR_MIN or v['rack_b'] > -RACK_BLUR_MIN:
                 bad.append(f"{pid}/{shot}/{dur} focus {v['focus_shift']:.2f} blur {v['rack_a']:.2f}%/{v['rack_b']:.2f}%")
+        if pid == 'telephoto_snap_zoom' and dur >= 96:
+            if v['lens_range'] < DOLLY_ZOOM_MIN_MM:
+                bad.append(f"{pid}/{shot}/{dur} lens {v['lens_range']:.1f} mm")
+            # telephoto_snap_zoom intentionally changes the product size (ratio ~1.8), wider fill range allowed
+            if v['fill_max'] / v['fill_min'] > 2.5:
+                bad.append(f"{pid}/{shot}/{dur} size x{v['fill_max'] / v['fill_min']:.2f}")
     rk = [v for p, s, d, v in cases() if p == 'rack_focus' and s == 'hero_34' and d == 200][0]
     return bad, f"rack hero_34/200: f/{rk['fstop']:.2f}, defocus {rk['rack_a']:.1f}% -> {rk['rack_b']:.1f}% of the sensor"
 

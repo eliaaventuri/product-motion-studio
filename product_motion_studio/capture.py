@@ -161,7 +161,14 @@ def _bg_lighting(scene):
     p, src, base = _source(scene, 'background_light')
     data = {k: v for k, v in src.items() if k != 'lights'}
     lights = _lights(scene, 'bg_lights')
-    data['lights'] = [dict(s) for s in src['lights']] if lights is None else lights
+    if lights is None:
+        data['lights'] = [dict(s) for s in src['lights']]
+    else:
+        for spec, ref in zip(lights, src['lights']):                   # gobo panels and glow strips are meshes, not lights:
+            for key in ('gobo', 'strip'):                                # they come from the preset (same index)
+                if key in ref:
+                    spec[key] = dict(ref[key]) if isinstance(ref[key], dict) else ref[key]
+        data['lights'] = lights
     return {'data': data, 'base': base, 'meta': _meta(p)}
 
 
@@ -188,14 +195,15 @@ def _pose(scene):
 def _camera(scene):
     p, src, base = _source(scene, 'camera_shot')
     _, merged = live.preset(scene, 'camera_shot')                  # lens / padding / f-stop / focus: the live values
-    data = {k: v for k, v in src.items() if k not in ('lens', 'padding', 'dof', 'focus_offset')}
+    data = {k: v for k, v in src.items() if k not in ('lens', 'padding', 'dof', 'focus_offset', 'autofocus')}
     data.update(lens=_r(merged['lens'], 3), padding=_r(merged['padding'], 4), dof=_r(merged['dof'], 3),
-                focus_offset=_r(merged.get('focus_offset', 0.0), 4))
+                focus_offset=_r(merged.get('focus_offset', 0.0), 4), autofocus=merged.get('autofocus', False))
     cam = bpy.data.objects.get('PMS_Camera')
     if cam is not None and core.has_product():
         pms = core.settings(scene)
         data['lens'] = _r(cam.data.lens, 3)
         data['dof'] = _r(cam.data.dof.aperture_fstop, 3) if cam.data.dof.use_dof else 0.0
+        data['autofocus'] = pms.cam_autofocus
         pose = _pose(scene)
         if pose:                                                     # moved by hand: az / el / height from where the camera is now
             data.update(az=_r(pose['az'], 3), el=_r(pose['el'], 3), target_z=_r(pose['target_z'], 4))
@@ -214,9 +222,10 @@ def _material(name):
 def _background(scene):
     p, src, base = _source(scene, 'background')
     _, merged = live.preset(scene, 'background')
-    data = {k: v for k, v in src.items() if k not in ('stops', 'gradient', 'roughness', 'self_light')}
+    data = {k: v for k, v in src.items() if k not in ('stops', 'gradient', 'roughness', 'self_light', 'distance', 'cove')}
     data.update(stops=[[_r(a), _rgb(c)] for a, c in sorted(((float(a), c) for a, c in merged['stops']), key=lambda s: s[0])],
-                gradient=dict(merged.get('gradient', {})), roughness=_r(merged['roughness']), self_light=_r(merged['self_light']))
+                gradient=dict(merged.get('gradient', {})), roughness=_r(merged['roughness']), self_light=_r(merged['self_light']),
+                distance=_r(merged.get('distance', 1.0)), cove=_r(merged.get('cove', 1.0)))
     mat = _material('PMS_Background')
     if mat is not None:
         nt = mat.node_tree
@@ -297,6 +306,9 @@ def _look(scene):
         for key, name in (('threshold', 'Threshold'), ('strength', 'Strength'), ('size', 'Size')):
             if name in n.inputs:
                 g[key] = _r(n.inputs[name].default_value, 5)
+        tint = tuple(_r(c, 4) for c in n.inputs['Tint'].default_value[:3])
+        if tint != (1.0, 1.0, 1.0):
+            g['tint'] = tint
         data['glare'] = g
     n = _node(ng, 'CompositorNodeLensdist')
     if n is not None:

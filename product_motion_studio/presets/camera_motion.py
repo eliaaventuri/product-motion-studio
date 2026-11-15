@@ -24,8 +24,10 @@ FAMILIES (exceptions declared, checked by tests/test_camera_quality.py)
          orbit_360_loop .............. LINEAR, constant speed fixed by the clip length (a loop must close), clockwise
                                       so that it does not cancel a (counter-clockwise) Spin Loop of the product;
          whip_orbit_finale ........... declared whip: up to ~170 deg/s for ~1 s;
-         dolly_zoom / rack_focus ..... the only ones that change the lens / the focus (declared);
-         handheld .................... small mixed-frequency noise (< 0.9 deg p-p, no digital jitter).
+         dolly_zoom / rack_focus ..... change the lens / the focus (declared);
+         telephoto_snap_zoom ......... declared lens change: wide to tele in ~0.45 s, camera locked;
+         handheld .................... small mixed-frequency noise (< 0.9 deg p-p, no digital jitter);
+         micro_breathing_macro ....... declared like handheld: a 1.2 % breath of the distance and a tiny rotation drift.
 """
 
 from math import asin, cos, degrees, log, pi, radians, sin
@@ -613,3 +615,77 @@ def handheld(pivot, cam, target, ctx):
         _noise(ctx, cam, 'rotation_euler', i, s * w * 0.35, sc * 0.3, 53.0 + 17.0 * i, depth=1)
     for i in (0, 2):                                      # shoulder sway: a hair of position (fraction of the size)
         _noise(ctx, cam, 'location', i, ctx.size * 0.006, sc * 1.4, 91.0 + 13.0 * i, depth=1)
+
+
+@register('camera_motion', 'truck_left', 'Truck Left', 'crane',
+          'Camera slides sideways to the left without turning: parallax against the backdrop.', loop=False)
+def truck_left(pivot, cam, target, ctx):
+    _slide(ctx, cam, target, -ctx.right, ctx.tans[0], ctx.opt.get('amount', 0.28), 0.07)
+
+
+@register('camera_motion', 'helical_push_orbit', 'Helical Push Orbit', 'orbit',
+          'Orbits 120 degrees to the right while pushing in 30 % and rising 12 degrees: a helix that lands close.', loop=False)
+def helical_push_orbit(pivot, cam, target, ctx):
+    deg, rise = ctx.opt.get('degrees', 120), ctx.opt.get('rise', 12)
+    closer = ctx.opt.get('amount', 0.3)
+    _arc(ctx, pivot, cam,
+         az=(ctx.az_deg, ctx.az_deg + deg),
+         el=(ctx.el_deg, ctx.el_deg + rise),
+         amount=deg,
+         peak=16,
+         peak_max=24,
+         ramp=(0.35, 0.45),
+         el_ramp=(0.5, 0.35),
+         closer=closer)
+
+
+@register('camera_motion', 'crane_to_zenith_90', 'Crane to Zenith', 'crane',
+          'Crane from the shot height up to an almost straight-down top view, with a slight turn.', loop=False)
+def crane_to_zenith_90(pivot, cam, target, ctx):
+    end_el = ctx.opt.get('end_el', 88)
+    if ctx.el_deg >= end_el - 1:
+        return
+    amount = end_el - ctx.el_deg
+    _arc(ctx, pivot, cam,
+         az=(ctx.az_deg, ctx.az_deg + 8),
+         el=(ctx.el_deg, end_el),
+         amount=amount,
+         peak=14,
+         peak_max=22,
+         ramp=(0.40, 0.40))
+
+
+@register('camera_motion', 'telephoto_snap_zoom', 'Telephoto Snap Zoom', 'lens',
+          'Locked camera, the lens snaps from wide to tele in under half a second: a punchy optical zoom for '
+          'social transitions.', loop=False)
+def telephoto_snap_zoom(pivot, cam, target, ctx):
+    l0 = ctx.lens
+    lw = l0 / ctx.opt.get('ratio', 1.8)                   # wider start: the product is smaller, always in frame
+    k = min(1.0, _clip_s(ctx))                            # clips under 1 s: the phases shrink in proportion
+    fa, fb = ctx.f0 + 0.25 * k * ctx.fps, ctx.f0 + 0.70 * k * ctx.fps
+
+    def lens(f):
+        x = _clamp01((f - fa) / max(1e-6, fb - fa))
+        return lw + (l0 - lw) * (1 - (1 - x) ** 4 * (1 + 4 * x))     # soft start, hard ease-out (C1 at both ends)
+
+    dense = [fa + (fb - fa) * i / 8 for i in range(9)]
+    _put(cam.data, 'lens', 0, lens, _thin(ctx, [ctx.f0, ctx.f1] + dense, gap=1))
+    cam.data.lens = lw
+
+
+@register('camera_motion', 'micro_breathing_macro', 'Micro Breathing Macro', 'lens',
+          'Almost locked camera that breathes: a tiny push and pull with an organic drift, imperceptible but alive, '
+          'for close-ups.', loop=False)
+def micro_breathing_macro(pivot, cam, target, ctx):
+    d = _clip_s(ctx)
+    cycles = max(1, round(d / 4.5))                       # whole breaths in the clip
+
+    def dist_fn(f):
+        t = (f - ctx.f0) / ctx.fps
+        return ctx.dist * (1 + 0.012 * sin(2 * pi * cycles * t / d))
+
+    frames = _grid(ctx, 4.0)
+    _put(cam, 'location', 1, lambda f: -dist_fn(f), frames)
+
+    _noise(ctx, cam, 'rotation_euler', 0, 0.0025, 4.0, 7.0, depth=1)
+    _noise(ctx, cam, 'rotation_euler', 2, 0.0025, 4.0, 31.0, depth=1)

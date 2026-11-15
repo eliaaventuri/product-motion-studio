@@ -3,7 +3,8 @@
 SCHEMA   register('look', id, name, category, desc, data=dict(
              view_transform='AgX' | 'Khronos PBR Neutral' | 'Standard' ..., look='AgX - Punchy' | 'None' ...
                  (name or fragment: the builder falls back to 'None' if it does not exist), exposure=stops, gamma=1.0,
-             glare=None | dict(type='Fog Glow'|'Bloom'|'Streaks'|'Ghosts'|'Simple Star', threshold, strength, size 0..1, quality),
+             glare=None | dict(type='Fog Glow'|'Bloom'|'Streaks'|'Ghosts'|'Simple Star', threshold, strength, size 0..1, quality,
+                               tint=(r, g, b) optional colour of the glow),
              vignette=None | dict(darken=stops darker at the corners, size=0..1 clear area, feather=0..1),
              lens=None | dict(dispersion=0..0.1, distortion=-0.1..0.1),
              grade=None | dict(saturation=1.0, contrast=0.0, gain=(r, g, b), lift=(r, g, b)),
@@ -212,3 +213,36 @@ register('look', 'film_warm_lift', 'Film Warm Lift', 'film', 'Film Warm with the
          data=dict(view_transform='AgX', look='AgX - Medium Low Contrast', exposure=0.4, gamma=1.0,
                    glare=_fog(0.48, 0.22, 0.45), vignette=_vig(0.5, 0.8, 0.7), lens=None,
                    grade=_grade(0.95, 0.03, (1.18, 1.0, 0.8), (0.02, 0.01, 0.0)), grain=0.1))
+
+
+# --- film stocks and filters --------------------------------------------------------------------------------------
+
+register('look', 'kodak_portra_creamy', 'Kodak Portra Creamy', 'film', 'Portra-like: creamy soft highlights, warm pastel skin of the image, gently lifted shadows and a fine grain: skin-care, beauty, ceramics.',
+         data=dict(view_transform='AgX', look='None', exposure=0.15, gamma=1.0,
+                   glare=_fog(0.9, 0.08, 0.35), vignette=_vig(0.2), lens=None,
+                   grade=_grade(0.88, -0.1, (1.04, 1.0, 0.93), (0.025, 0.018, 0.012)), grain=0.08))
+
+register('look', 'cinestill_800t_halation', 'CineStill 800T Halation', 'film', 'Tungsten night film: red-orange halation around the highlights, cool blue shadows, a little grain: tech and automotive.',
+         data=dict(view_transform='AgX', look='None', exposure=-0.2, gamma=1.0,
+                   glare=dict(_fog(0.55, 0.35, 0.5), tint=(1.0, 0.32, 0.18)), vignette=_vig(0.4), lens=None,
+                   grade=_grade(1.05, 0.1, (0.95, 0.98, 1.07), (0.0, 0.012, 0.035)), grain=0.15))
+
+register('look', 'fuji_velvia_rich', 'Fuji Velvia Rich', 'film', 'Slide-film punch: high micro-contrast and rich, dense colour: food and beverage.',
+         data=dict(view_transform='AgX', look='AgX - Punchy', exposure=0.75, gamma=1.0,
+                   glare=None, vignette=_vig(0.25), lens=None,
+                   grade=_grade(1.3, 0.15, (1.0, 1.0, 0.97), (0.0, 0.005, 0.012)), grain=None))
+
+register('look', 'pro_mist_1_4_soft', 'Pro-Mist 1/4 Soft', 'stylised', 'Diffusion filter: a soft halo spreads from the specular highlights while the edges stay sharp; neutral (Dreamy Bloom is pink).',
+         data=dict(view_transform='AgX', look='None', exposure=0.1, gamma=1.0,
+                   glare=_fog(0.3, 0.22, 0.75), vignette=None, lens=None,
+                   grade=_grade(0.95, -0.05, lift=(0.012, 0.012, 0.012)), grain=None))
+
+register('look', 'chromatic_prism_edge', 'Chromatic Prism Edge', 'stylised', 'Neutral grade with a light chromatic dispersion that grows towards the edges of the frame, like a prism filter.',
+         data=dict(view_transform='AgX', look='None', exposure=0.0, gamma=1.0,
+                   glare=_fog(1.0, 0.06, 0.3), vignette=_vig(0.3), lens=dict(dispersion=0.03, distortion=0.0),
+                   grade=None, grain=None))
+
+register('look', 'cyber_acid_editorial', 'Cyber Acid Editorial', 'editorial', 'High-impact grade: acid green highlights, magenta shadows, saturated and contrasty: streetwear, sneakers, sport.',
+         data=dict(view_transform='AgX', look='AgX - Punchy', exposure=0.6, gamma=1.0,
+                   glare=None, vignette=_vig(0.5), lens=None,
+                   grade=_grade(1.35, 0.2, (0.92, 1.08, 0.94), (0.03, 0.0, 0.04)), grain=0.1))

@@ -4,12 +4,15 @@ preset is added or changed; the thumbnails are generated files, never edit them 
     /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup --python plugin/tools/make_thumbnails.py
     ... -- [--only lighting,look] [--ids id1,id2] [--engine CYCLES|EEVEE] [--out DIR] [--sheet contact_sheet.png]
 
-  lighting, background, background_light, look, camera_shot, recipe: a render (128 px) of a test scene (glass bottle, brushed
+  lighting, background, background_light, look, camera_shot, recipe, floor: a render (128 px) of a test scene (glass bottle, brushed
       metal cylinder, orange plastic cube) built by the add-on itself with the preset chosen (a recipe is shown three quarters
       into its animation).  --engine CYCLES (default): 32 samples, OIDN denoise, Metal GPU when there is one (about a quarter of
       a second each); --engine EEVEE: 16 samples with ray tracing.  The thumbnails show what the final render will look like,
       so Cycles is the default.  (The sections are made backdrop-first and `lighting` last: after the two dispersion lights
       Blender 5.1 renders the light-linked backdrop lights wrongly for the rest of the session, even after reloading a file.)
+  floor shadow_catcher: rendered as PNG RGBA with transparent background, then composed over a checkerboard (16 px squares,
+      greys 0.80 and 0.62) and saved as JPG.
+  format: product framed in the aspect ratio, with grey 0.25 bands where the format doesn't fill the 128x128 square.
   product_motion, camera_motion: Workbench "multi-exposure": 4 poses of the movement laid over each other, the older the
       fainter, on the empty studio backdrop.  The shot lasts 200 frames and the poses are spread over the ACTION WINDOW, not
       over the whole shot: where the product (or, for the camera moves, the product in the picture) really moves, at equal
@@ -37,7 +40,7 @@ from product_motion_studio import api, core, presets, previews
 SIZE = 128
 OUT = previews.DIR
 IDS = None                                  # --ids: only these presets (to try the tool)
-STILL = ('lighting', 'background', 'background_light', 'look', 'camera_shot', 'recipe')
+STILL = ('lighting', 'background', 'background_light', 'look', 'camera_shot', 'recipe', 'floor')
 MULTI = ('product_motion', 'camera_motion')
 POSES = 4
 SHOT_FRAMES = 200                           # length of the shot the movement thumbnails are taken from
@@ -61,6 +64,10 @@ def _args():
         elif a == '--out':
             opt['out'] = os.path.abspath(argv[i + 1])
     return opt
+
+
+def thumb_path(section, pid):
+    return os.path.join(OUT, section, previews.filename(pid))
 
 
 # --- the test scene ------------------------------------------------------------------------------------------------
@@ -179,10 +186,21 @@ def still_setup(scene, engine):
     im.file_format, im.color_mode, im.quality = 'JPEG', 'RGB', 85
 
 
-def render_to(scene, path):
-    square(scene)
+def render_to(scene, path, force_square=True):
+    if force_square:
+        square(scene)
     scene.render.filepath = path
     bpy.ops.render.render(write_still=True)
+
+
+def read_rgba_size(path, width, height):
+    img = bpy.data.images.load(path, check_existing=False)
+    img.colorspace_settings.name = 'Non-Color'
+    actual_w, actual_h = img.size
+    buf = np.empty(actual_w * actual_h * 4, dtype=np.float32)
+    img.pixels.foreach_get(buf)
+    bpy.data.images.remove(img)
+    return buf.reshape(actual_h, actual_w, 4)
 
 
 def make_still(section, tmp, report, engine='CYCLES'):
@@ -196,7 +214,30 @@ def make_still(section, tmp, report, engine='CYCLES'):
         extra = {'bg_image': plate} if section == 'background' else {}
         out = api.apply(section, pid, force=True, **extra)
         scene.frame_set(scene.frame_start + (round(0.75 * (scene.frame_end - scene.frame_start)) if section == 'recipe' else 0))
-        render_to(scene, os.path.join(OUT, section, pid + '.jpg'))
+        if section == 'floor':
+            data = presets.get('floor', pid).data                  # (the apply result has no preset data)
+            if data.get('shadow_catcher'):
+                # Render PNG RGBA in tmp
+                im = scene.render.image_settings
+                im.file_format, im.color_mode = 'PNG', 'RGBA'
+                tmp_path = os.path.join(tmp, 'floor_shadow.png')
+                render_to(scene, tmp_path)
+                # Read pixels
+                rgba = read_rgba_size(tmp_path, SIZE, SIZE)
+                # Compose over checkerboard
+                yy, xx = np.indices((SIZE, SIZE)) // 16
+                board = np.where(((xx + yy) % 2 == 0)[..., None], 0.80, 0.62).astype(np.float32) * np.ones(3, np.float32)
+                a = rgba[..., 3:4]
+                rgb = rgba[..., :3]
+                comp = rgb * a + board * (1 - a)
+                # Save as JPG
+                write_jpg(comp, thumb_path(section, pid))
+                # Restore JPEG/RGB/85
+                im.file_format, im.color_mode, im.quality = 'JPEG', 'RGB', 85
+            else:
+                render_to(scene, thumb_path(section, pid))
+        else:
+            render_to(scene, thumb_path(section, pid))
         report.append((section, pid, out['warnings']))
 
 
@@ -266,9 +307,12 @@ def pose_frames(scene, points, loop):
 
 
 def product_points(scene):
-    """Box corners of the product, in the world, at the current frame."""
+    """Box corners of the product, in the world, at the current frame (plus the boxes of the parts that move on their own,
+    exploded_z_reveal: their travel is the action)."""
     inf = core.info(scene)
-    return lambda: np.array([tuple(inf.root.matrix_world @ Vector(c)) for c in inf.corners])
+    parts = [ch for ch in inf.root.children if ch.get('pms_explode')]
+    return lambda: np.array([tuple(inf.root.matrix_world @ Vector(c)) for c in inf.corners]
+                            + [tuple(ch.matrix_world @ Vector(c)) for ch in parts for c in ch.bound_box])
 
 
 def picture_points(scene):
@@ -322,9 +366,47 @@ def make_multi(section, tmp, report):
             img = img * (1 - a) + px[..., :3] * a
         for c in backdrop:
             c.hide_render = False
-        write_jpg(img, os.path.join(OUT, section, pid + '.jpg'))
+        write_jpg(img, thumb_path(section, pid))
         report.append((section, pid, out['warnings']))
     return None
+
+
+# --- format thumbnails ---------------------------------------------------------------------------------------------------
+
+def make_format(tmp, report, engine='CYCLES'):
+    scene, _ = new_scene('CYCLES' if engine == 'CYCLES' else 'BLENDER_EEVEE')
+    still_setup(scene, engine)
+    plate = os.path.join(tmp, 'plate.png')
+    make_image(plate)
+    for pid in presets.REGISTRY['format']:
+        if IDS and pid not in IDS:
+            continue
+        out = api.apply('format', pid, force=True)
+        # Force scene update
+        bpy.context.view_layer.update()
+        w, h = scene.render.resolution_x, scene.render.resolution_y
+        max_dim = max(w, h)
+        rx = max(1, round(w * SIZE / max_dim))
+        ry = max(1, round(h * SIZE / max_dim))
+        scene.render.resolution_x = rx
+        scene.render.resolution_y = ry
+        scene.render.resolution_percentage = 100
+        # Render PNG RGB in tmp (don't force square)
+        im = scene.render.image_settings
+        im.file_format, im.color_mode = 'PNG', 'RGB'
+        tmp_path = os.path.join(tmp, 'format_thumb.png')
+        render_to(scene, tmp_path, force_square=False)
+        # Read pixels (rx x ry)
+        rgb_small = read_rgba_size(tmp_path, rx, ry)[..., :3]
+        # Center in SIZE x SIZE canvas filled with grey 0.25 (lighter than the dark studio top: the frame shows)
+        canvas = np.full((SIZE, SIZE, 3), 0.25, dtype=np.float32)
+        y0 = (SIZE - ry) // 2
+        x0 = (SIZE - rx) // 2
+        canvas[y0:y0+ry, x0:x0+rx] = rgb_small
+        write_jpg(canvas, thumb_path('format', pid))
+        # Restore JPEG/RGB
+        im.file_format, im.color_mode, im.quality = 'JPEG', 'RGB', 85
+        report.append(('format', pid, out['warnings']))
 
 
 # --- contact sheet --------------------------------------------------------------------------------------------------------
@@ -334,7 +416,7 @@ def contact_sheet(path, sections, per_row=int(os.environ.get("PMS_SHEET_COLS", 1
     for section in sections:
         ids = list(presets.REGISTRY[section])
         for i in range(0, len(ids), per_row):
-            row = [read_jpg(os.path.join(OUT, section, pid + '.jpg')) for pid in ids[i:i + per_row]]
+            row = [read_jpg(thumb_path(section, pid)) for pid in ids[i:i + per_row]]
             row += [np.full((SIZE, SIZE, 3), 0.1, np.float32)] * (per_row - len(row))
             rows.append(np.concatenate([np.pad(t, ((0, 0), (0, gap), (0, 0)), constant_values=0.1) for t in row], axis=1))
         rows.append(np.full((gap * 2, rows[-1].shape[1], 3), 0.1, np.float32))
@@ -377,9 +459,12 @@ def main():
         for section in sections:
             os.makedirs(os.path.join(OUT, section), exist_ok=True)
             for f in os.listdir(os.path.join(OUT, section)):             # thumbnails of presets that no longer exist
-                if f[:-4] not in presets.REGISTRY[section]:
+                expected = {previews.filename(p) for p in presets.REGISTRY[section]}
+                if f not in expected:
                     os.remove(os.path.join(OUT, section, f))
-            if section in STILL:
+            if section == 'format':
+                make_format(tmp, report, opt['engine'])
+            elif section in STILL:
                 make_still(section, tmp, report, opt['engine'])
             else:
                 make_multi(section, tmp, report)

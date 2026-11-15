@@ -31,9 +31,10 @@ EXCEPTIONS (declared; tests/test_motion_quality.py and tools/motion_report.py kn
            velocity jumps at the contact frame ON PURPOSE (arrival without ease, then recoil).
          - drift presets are the whole shot (their "action" is the drift); bounce_loop has contacts at its seam (no C1 there).
          - peak speeds: coin_flip (3 turns in 1.3 s), spin_down_to_hero (starts spinning fast), snap_turns_90, glitch_step.
+         - beat_pulse_120bpm: the kick on the beat is a declared contact (velocity jump at the attack, IMPACTS in motion_report).
 """
 
-from math import cos, pi, radians, sin, sqrt, tau
+from math import cos, exp, pi, radians, sin, sqrt, tau
 from random import Random
 from mathutils import Matrix, Vector
 from . import register
@@ -207,6 +208,36 @@ def spin_360_settle(root, ctx):
     _life(root, ctx, t[2] + 0.2)
 
 
+@register('product_motion', 'spring_overshoot_settle', 'Spring Overshoot Settle', 'spin',
+          'Fast turn that overshoots about 25 percent and settles like a damped spring in about 1.2 s, ending rotated.',
+          loop=False, ends_at_rest=False, sweep='spin', margin=1.02)
+def spring_overshoot_settle(root, ctx):
+    a, zeta, w = ctx.opt.get('angle', 90), 0.4, 8.3
+    wd = w * sqrt(1.0 - zeta * zeta)
+    t = ctx.plan(2.0)
+
+    def pose(tt):
+        s = tt / ctx.k                                  # the spring runs in shot time (compressed when the shot is short)
+        x = 1.0 - exp(-zeta * w * s) * (cos(wd * s) + zeta * w / wd * sin(wd * s))
+        return None, _rot(UP, a * x), None
+    bake(root, ctx, pose, ground=False)
+    _life(root, ctx, t[1] + 0.2)
+
+
+@register('product_motion', 'pendulum_damped_settle', 'Pendulum Damped Settle', 'spin',
+          'Swings 35 degrees left and right, the swing dies out in about 3 s (period 1.8 s) and the product comes to rest.',
+          loop=False, ends_at_rest=True, sweep='spin', margin=1.02)
+def pendulum_damped_settle(root, ctx):
+    a, per, dec = 35.0, 1.8, 0.9
+    ctx.plan(5.0 * dec)
+
+    def pose(tt):
+        s = tt / ctx.k
+        yaw = a * exp(-s / dec) * cos(tau * s / per) * (1.0 - e_smooth((s - 4.0 * dec) / dec))
+        return None, _rot(UP, yaw), None
+    bake(root, ctx, pose, ground=False)
+
+
 @register('product_motion', 'wobble_spin_loop', 'Wobble Spin Loop', 'loop',
           'Turntable with a gentle nodding wobble (about 6 degrees), floating just above the floor, seamless.',
           loop=True, ends_at_rest=False, sweep='spin', margin=1.1, lift=0.07)
@@ -286,6 +317,73 @@ def snap_turns_90(root, ctx):
         yaw = sum(90.0 * e_over(_x(t, s0, s0 + sd), 0.065, 2, 3, 0.55) for s0 in starts)
         return None, _rot(UP, yaw), None
     bake(root, ctx, pose, ground=False)
+
+
+@register('product_motion', 'gyro_precession_loop', 'Gyro Precession Loop', 'loop',
+          'Spinning-top loop: the leaned product precesses around the vertical (about every 6 s) while it spins on its own axis, seamless.',
+          loop=True, ends_at_rest=False, sweep='spin', margin=1.1)
+def gyro_precession_loop(root, ctx):
+    right, _ = _axes(ctx)
+    tilt = ctx.opt.get('tilt', 10.0)
+    prec, spins = max(1, round(ctx.dur_s / 6.0)), max(2, round(ctx.dur_s / 3.0))
+
+    def rot_at(u):
+        p = 360.0 * prec * u
+        return _rot(UP, p) @ _rot(right, tilt) @ _rot(UP, 360.0 * spins * u - p)
+    lift = Vector((0, 0, _hover(ctx, rot_at)))
+    bake(root, ctx, lambda t: (lift, rot_at(t / ctx.dur_s), None), cyc=True, ground=False)
+
+
+@register('product_motion', 'beat_pulse_120bpm', 'Beat Pulse 120 BPM', 'loop',
+          'Scale pulse on the beat (120 BPM, option bpm): a 4.5% kick in 0.06 s that decays, synced to Reels and TikTok, seamless.',
+          loop=True, ends_at_rest=True, margin=1.03)
+def beat_pulse_120bpm(root, ctx):
+    bpm = ctx.opt.get('bpm', 120)
+    n = max(1, round(ctx.dur_s * bpm / 60.0))
+    per = ctx.dur_s / n
+
+    def pose(t):
+        x = t - per * int(t / per)
+        kick = e_smooth(x / 0.06) if x < 0.06 else exp(-(x - 0.06) / 0.12)
+        s = 1.0 + 0.045 * kick * (1.0 - e_smooth((x - 0.6 * per) / (0.4 * per)))
+        return Vector((0, 0, _pin(ctx, s))), None, s
+    bake(root, ctx, pose, cyc=True, ground=False)
+
+
+@register('product_motion', 'showcase_4_angles_snap', 'Showcase 4 Angles', 'loop',
+          'Four stops at 90-degree angles: each holds with a slow drift, then turns to the next angle in under 1 s, seamless.',
+          loop=True, ends_at_rest=True, sweep='spin', margin=1.02)
+def showcase_4_angles_snap(root, ctx):
+    per = ctx.dur_s / 4.0
+    mv = min(0.9, 0.9 * per)
+    hold = per - mv
+    drift = 3.0 * min(1.0, hold / 1.5)                    # short clips: the hold is brief, so is its drift (no kick at the seam)
+
+    def pose(t):
+        k = min(3, int(t / per))
+        x = t - k * per
+        if x < hold:
+            yaw = 90.0 * k + drift * e_smooth(x / hold)
+        else:
+            yaw = 90.0 * k + drift + (90.0 - drift) * e_over(_x(x, hold, per), 0.04, 2, 3, 0.8)
+        return None, _rot(UP, yaw), None
+    bake(root, ctx, pose, cyc=True, ground=False)
+
+
+@register('product_motion', 'zero_gravity_tumble_loop', 'Zero Gravity Tumble Loop', 'loop',
+          'Floats above the floor and tumbles slowly in every direction (a full turn about every 14 s, a gentle bob), seamless.',
+          loop=True, ends_at_rest=False, sweep='spin', margin=1.1)
+def zero_gravity_tumble_loop(root, ctx):
+    n, c = _turns(ctx, 14.0), _cycles(ctx, 5.0)
+
+    def rot_at(u):
+        ph = tau * u
+        return _rot(UP, 360.0 * n * u) @ _rot((0, 1, 0), 12.0 * sin(2 * ph + 1.1)) @ _rot((1, 0, 0), 18.0 * sin(ph + 0.3))
+    lift = _hover(ctx, rot_at)                         # the lowest corner clears the floor whatever the shape
+
+    def pose(t):
+        return Vector((0, 0, lift + 0.03 * (1.0 + sin(tau * c * t / ctx.dur_s)))), rot_at(t / ctx.dur_s), None
+    bake(root, ctx, pose, cyc=True, ground=False)
 
 
 # === luxury drift ============================================================
@@ -477,6 +575,39 @@ def slide_in_right(root, ctx):
     _life(root, ctx, t[2])
 
 
+@register('product_motion', 'slide_in_left', 'Slide-in Left', 'reveal',
+          'Sweeps in from the back left in an arc (1.2 s), brakes with friction, yaw -30 degrees arrives later.',
+          loop=False, offscreen=True, ends_at_rest=True, margin=1.04)
+def slide_in_left(root, ctx):
+    r, f = _axes(ctx)
+    d = 2.6
+    t = ctx.plan(1.2, 0.35)
+
+    def pose(tt):
+        e = e_over(_x(tt, 0.0, t[1]), 0.04 / d, 1, 3, 0.72)
+        q = e_beta(_x(tt, 0.0, t[1]), 2, 3)
+        yaw = -30.0 * (1.0 - e_beta(_x(tt, 0.15, t[2]), 2, 3))
+        return -r * (d * (1.0 - e)) + f * (1.1 * (1.0 - q)), _rot(f, _lean(tt, 0.0, t[1], 5.0)) @ _rot(UP, yaw), None
+    bake(root, ctx, pose)
+    _life(root, ctx, t[2])
+
+
+@register('product_motion', 'slide_in_bottom', 'Slide-in Bottom', 'reveal',
+          'Slides in from the bottom edge, from the foreground along the floor (1.1 s), brakes with friction, tips back as it stops.',
+          loop=False, offscreen=True, ends_at_rest=True)
+def slide_in_bottom(root, ctx):
+    r, f = _axes(ctx)
+    d = 1.6
+    t = ctx.plan(1.1, 0.3)
+
+    def pose(tt):
+        e = e_over(_x(tt, 0.0, t[1]), 0.04 / d, 1, 3, 0.72)
+        yaw = -12.0 * (1.0 - e_beta(_x(tt, 0.12, t[2]), 2, 3))
+        return -f * (d * (1.0 - e)), _rot(r, -_lean(tt, 0.0, t[1], 5.0)) @ _rot(UP, yaw), None
+    bake(root, ctx, pose)
+    _life(root, ctx, t[2])
+
+
 @register('product_motion', 'slide_in_top', 'Slide-in Top', 'reveal',
           'Glides down from above the frame in 1 s (no gravity), brakes softly and floats a hair off the floor once.',
           loop=False, offscreen=True, ends_at_rest=True, sweep='spin', margin=1.0)
@@ -536,6 +667,93 @@ def soft_scale_reveal(root, ctx):
         return Vector((0, 0, _pin(ctx, s))), _rot(UP, yaw), s
     bake(root, ctx, pose, ground=False)
     _life(root, ctx, t[2])
+
+
+@register('product_motion', 'exploded_z_reveal', 'Exploded Z Reveal', 'reveal',
+          'The parts lift apart along Z (a cap off its bottle, a lid off its case), float for a beat and drop back '
+          'into place with a small knock. Needs a product made of 2+ objects; a single object just lifts and settles.',
+          loop=False, ends_at_rest=True)
+def exploded_z_reveal(root, ctx):
+    parts = list(root.children)
+    # Check if any part has user animation (without pms_explode)
+    user_animated = False
+    for ch in parts:
+        ad = ch.animation_data
+        if ad and ad.action:
+            has_fcurves = any(fc.keyframe_points for fc in m.iter_fcurves(ch))
+            if has_fcurves and not ch.get('pms_explode'):
+                user_animated = True
+                break
+    if user_animated or len(parts) < 2:
+        # FALLBACK: root lifts and settles (bake offsets are fractions of the size)
+        ctx.note = ("exploded_z_reveal: needs 2+ parts without their own animation, "
+                    "the whole product lifts instead")
+        t = ctx.plan(0.3, 0.7, 0.9, 0.45)
+        t0, t_up, t_float, t_down = t[1], t[2], t[3], t[4]       # t[0] is the start: t0 ends the wait
+        hit = _Hit(ctx, [(t_down, 1.0)], squash=0.015, tilt=0.3, weight=0.7)
+
+        def pose(tt):
+            if tt < t_up:
+                z = 0.25 * e_beta(_x(tt, t0, t_up), 2, 3)
+            elif tt < t_float:
+                z = 0.25 * (1.0 + 0.03 * sin(pi * _x(tt, t_up, t_float)) ** 2)     # one soft bob, still at both ends
+            else:
+                z = 0.25 * (1.0 - _x(tt, t_float, t_down) ** 2)
+            return hit.pose(tt, Vector((0, 0, z)))
+        bake(root, ctx, pose)
+        _life(root, ctx, t_down + 0.2)
+        return
+
+    # Sort parts by min world Z of their bounding box
+    def min_z_world(ob):
+        if ob.type == 'EMPTY':
+            return ob.matrix_world.translation.z
+        pts = [ob.matrix_world @ Vector(c) for c in ob.bound_box]
+        return min(p.z for p in pts)
+
+    parts.sort(key=min_z_world)
+    n = len(parts)
+    gap = min(ctx.opt.get('gap', 0.22) * ctx.size, 0.6 * ctx.size / (n - 1))
+
+    # Timing: 0.3 wait, 0.7 rise, 0.9 float, 0.45 fall
+    t = ctx.plan(0.3, 0.7, 0.9, 0.45)
+    t0, t_up, t_float, t_down = t[1], t[2], t[3], t[4]       # t[0] is the start: t0 ends the wait
+
+    # Root impact on reassembly
+    hit = _Hit(ctx, [(t_down, 1.0)], squash=0.015, tilt=0.3, weight=0.7)
+
+    def pose(tt):
+        # Root hit on reassembly
+        root_loc, root_rot, root_scl = hit.pose(tt, None, None, 1.0)
+
+        for i, ch in enumerate(parts):
+            if i == 0:
+                # Lowest part stays put - no pms_explode, no animation
+                ch.delta_location = (0.0, 0.0, 0.0)
+                if 'pms_explode' in ch:
+                    del ch['pms_explode']
+            else:
+                lift = i * gap
+                if tt < t_up:
+                    z = lift * e_beta(_x(tt, t0, t_up), 2, 3)
+                elif tt < t_float:
+                    z = lift * (1.0 + 0.03 * sin(pi * _x(tt, t_up, t_float)) ** 2)     # one soft bob, still at both ends
+                else:
+                    z = lift * (1.0 - _x(tt, t_float, t_down) ** 2)
+                ch.delta_location = (0.0, 0.0, z)
+                ch['pms_explode'] = True
+                ch.keyframe_insert('delta_location', index=2, frame=ctx.f0 + int(round(tt * ctx.fps)))
+        # At the end, all back to 0 (but keep pms_explode as marker)
+        if tt >= t_down:
+            for i, ch in enumerate(parts):
+                if i > 0:
+                    ch.delta_location = (0.0, 0.0, 0.0)
+                    ch.keyframe_insert('delta_location', index=2, frame=ctx.f0 + int(round(tt * ctx.fps)))
+
+        return root_loc, root_rot, root_scl
+
+    bake(root, ctx, pose)
+    _life(root, ctx, t_down + 0.2)
 
 
 # === drop / impact ===========================================================

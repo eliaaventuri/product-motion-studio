@@ -69,11 +69,11 @@ def violations(res, only=None):
     return out
 
 
-@test(1, "all 54 presets, 4 durations (48 / 96 / 200 / 480 frames): every criterion of tools/motion_report.py")
+@test(1, "all 63 presets, 4 durations (48 / 96 / 200 / 480 frames): every criterion of tools/motion_report.py")
 def t1():
     res = runs()
     bad = violations(res)
-    assert len(IDS) == 54, len(IDS)
+    assert len(IDS) == 63, len(IDS)
     assert not bad, f"{len(bad)} violations, e.g. {bad[:4]}"
     return f"{len(res)} runs, 0 violations"
 
